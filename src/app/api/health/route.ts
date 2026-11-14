@@ -1,0 +1,1 @@
+export function GET(){return Response.json({status:"ok",service:"nixinx-control-plane",version:"0.1.0"})}
