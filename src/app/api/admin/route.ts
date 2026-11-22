@@ -25,7 +25,7 @@ export async function POST(req:NextRequest){
     const kind=str(body.kind,30);
     if(!["tenants","apps","modules","licenses"].includes(kind))throw new ApiError(400,"Unsupported record");
     const id=identifier(body.id);
-    if(kind!=="licenses"&&!isNewCatalogId(id))throw new ApiError(400,"Use a lowercase ID with letters, digits and hyphens (2-63 characters)");
+    if(kind!=="licenses"&&!isNewCatalogId(id))throw new ApiError(400,"Use a lowercase ID with letters, digits and hyphens (2-39 characters)");
     const appId=kind==="modules"?identifier(body.appId):kind==="licenses"?identifier(body.appId):"";
     const tenantId=kind==="licenses"?identifier(body.tenantId):"";
     const collection=kind==="modules"?"appModules":kind;
