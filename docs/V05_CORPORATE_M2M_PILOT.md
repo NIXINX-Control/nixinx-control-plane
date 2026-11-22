@@ -27,4 +27,10 @@ Respuesta mínima `{allowed:boolean,referenceCode:"NX-XXXXXXXXXX"}`, sin detalle
 
 V05 resuelve el contrato inicial M2M y denial-by-default, **no** la publicación comercial, el portal de pagos, el aislamiento por establecimiento, ni el bloqueo definitivo de todos los caminos hacia Firestore. Corporate sigue con SDK cliente directo. Los `appModules` V04 no se activan hasta validación del manifiesto versionado de repositorio.
 
-Referencia: [piloto Corporate](https://github.com/NIXINX-Managed/nelcy_corporate_group/blob/feat/corporate-control-gate-v01/docs/NIXINX_CONTROL_CORPORATE_PILOT_V01.md). 
+Referencia: [piloto Corporate](https://github.com/NIXINX-Managed/nelcy_corporate_group/blob/feat/corporate-control-gate-v01/docs/NIXINX_CONTROL_CORPORATE_PILOT_V01.md).
+
+## Control V05 — Puente sandbox de autorización temporal (añadido)
+
+Se incorpora `src/lib/corporate-preview-lease.ts`: la API M2M verifica licencia e instalación y sincroniza un documento Firestore de **Corporate sandbox** desde el servidor de Control. Permite a `firestore.preview.rules` exigir a cada lectura/escritura un lease activo no vencido, junto a membresía. 30 s máximo; denegación invalida el lease. Sin proyecto `nixinx-corporate-sbx-...`, `sandboxOrgId` autorizado y permisos IAM del servicio **deniega** y no expone datos.
+
+Aún faltan GCP sandbox real, IAM y variables Vercel Preview, enrolamiento, reglas desplegadas, Emulator/E2E y mecanismo seguro de renovación continua de lease. **No** se ha ejecutado GCP ni configurado tokens. Hasta esos gates, el estado sigue NO E2E.
