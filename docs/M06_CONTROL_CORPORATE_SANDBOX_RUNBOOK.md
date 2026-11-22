@@ -66,3 +66,16 @@ El **espejo de entitlement** necesita una sincronización backend confiable aún
 - Probar IAM y roles del Admin SDK; esas credenciales eluden las reglas cliente y deben autorizarse en servidor.
 
 **STOP:** Hasta que existan Firebase aislados, variables correctas, lease bridge y pruebas negativas, no hay E2E positivo ni autorización para Production. Las reglas productivas `firestore.rules` permanecen inalteradas.
+
+## M06-B — Puente backend para el lease (implementación, aún sin entorno autorizado)
+
+La rama V05 ahora implementa `src/lib/corporate-preview-lease.ts`, respaldado por el contrato puro `corporate-lease-contract.ts` y tests. Tras una petición M2M autenticada, Control comprueba el vínculo exacto `appInstallations/{hostname}` (tenant, aplicación Corporate, dominio, Preview), licencia/estado/módulo, y si hay `sandboxOrgId` configurado intenta escribir **directamente en Firestore de Corporate sandbox** el documento `organizations/{sandboxOrgId}/nixinxControl/access`. Solo un backend con credencial IAM autorizada puede hacerlo.
+
+- **Permiso:** `allowed=true` → `active=true`, `expiresAt` 30 segundos posterior al instante del servidor; denegación con vínculo válido → `active=false` y lease expirado.
+- **Fail-closed:** no responde `allowed=true` si falla la escritura de Firestore sandbox, falta `sandboxOrgId`, proyecto sandbox no coincide o las credenciales no autorizan la operación. Si una instalación deja de existir o Control cae sin recibir petición, cualquier lease previo expira por sí solo en un máximo de 30 segundos.
+- **Destino restringido:** únicamente IDs con formato `nixinx-corporate-sbx-...`, la organización interna exacta `NIXINX_CONTROL_CORPORATE_SANDBOX_ORG_ID` y una instalación que coincida con el `tenantId` del token. En Control Preview configurar `NIXINX_CONTROL_CORPORATE_SANDBOX_PROJECT_ID` y `NIXINX_CONTROL_CORPORATE_SANDBOX_ORG_ID` (sin secretos públicos); en la instalación agregar `sandboxOrgId` correspondiente a `NEXT_PUBLIC_ORG_ID` de Corporate sandbox.
+- **Credencial:** `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` del **Control sandbox**, con autorización limitada y explícita a Firestore del **Corporate sandbox**. Preferir identidad federada cuando se diseñe; no usar el SA de Control o Corporate de producción. Las credenciales, IAM y billing aún NO están configurados o verificados.
+- **Límite:** el contrato se renueva **solo cuando Corporate consulta Control en el backend**. Una sesión abierta sin nuevas consultas caducará a los 30 segundos, aunque siga licenciada. El heartbeat seguro/autenticado y la revocación proactiva al pulsar Suspender siguen pendientes; no se debe presentar como comportamiento productivo completo.
+- **CI:** tests de política de lease (proyecto sandbox, org exacta, duración, denegación) y tests estructurales de `firestore.preview.rules`. **No equivalen** a pruebas Firebase Emulator ni E2E con GCP.
+
+**No desplegar a producción, no cambiar reglas originales de Nelcy, no crear IAM de larga duración por comodidad.**
