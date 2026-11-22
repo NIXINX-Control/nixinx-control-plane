@@ -2,6 +2,7 @@ import {NextRequest} from "next/server";
 import {db,fail,ApiError} from "@/lib/server";
 import {accessDecision,License} from "@/lib/lifecycle";
 import {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference} from "@/lib/service-entitlement";
+import {syncCorporatePreviewLease} from "@/lib/corporate-preview-lease";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 
@@ -29,8 +30,22 @@ export async function POST(req:NextRequest){
     db.collection("licenses").doc(b.tenantId+"_"+b.appId).get(),
     b.moduleId?db.collection("appModules").doc(b.appId+"."+b.moduleId).get():Promise.resolve(null)
   ]);
-  const valid=installationAuthorized(b,installation.data(),tenant.data(),app.data()) && moduleIsVerified(b,moduleRecord?.data());
+  const i=installation.data();
+  const valid=installationAuthorized(b,i,tenant.data(),app.data()) && moduleIsVerified(b,moduleRecord?.data());
   const decision=valid?accessDecision(license.exists?license.data() as License:null,new Date(),b.moduleId):{allowed:false,reason:"INSTALLATION_NOT_AUTHORIZED"};
+  const bindingKnown=i?.tenantId===b.tenantId && i?.appId==="corporate" &&
+    i?.hostname===b.hostname && i?.environment==="preview" &&
+    typeof i?.sandboxOrgId==="string";
+  if(bindingKnown){
+    // The scoped service credential + exact installation binding are prerequisites.
+    // A denied entitlement writes a disabled/expired lease; a granted one renews a 30s lease.
+    // If the Firestore mirror fails we deny the request, never grant without enforcement.
+    await syncCorporatePreviewLease({
+      tenantId:b.tenantId,orgId:i.sandboxOrgId as string,hostname:b.hostname
+    },decision.allowed);
+  }else if(decision.allowed){
+    throw new Error("Verified sandbox organization binding missing");
+  }
   if(!decision.allowed){
     // No payment, license or tenant details are included in the client response.
     console.warn("nixinx_entitlement_denied",JSON.stringify({referenceCode,appId:"corporate",reason:decision.reason}));
