@@ -19,6 +19,13 @@ MVP inicial en rama feat/mobile-control-plane-mvp-20261114. Sin configuración p
 5. Service-to-service authorization: tokens de aplicación con rotación, cachés de autorización cortas y revocación.
 6. Integración piloto con Production Control; pruebas end-to-end de suspensión sin pérdida de datos.
 7. Seguridad, retención/backup, App Store/Play Store con Capacitor.
+## Seguridad administrativa V03 (rama/PR, sin producción)
+- Solo UIDs de `NIXINX_SUPERADMIN_UIDS` acceden a lectura y escritura de `/api/admin/configurations`; `NIXINX_ADMIN_UIDS` administra catálogo/licencias sin permiso Advanced. El UID superadmin no requiere duplicarse en la lista de admin.
+- La UI de Configurations se muestra únicamente tras respuesta autenticada del servidor `viewerRole=superadmin`; no se determina por email. Esto complementa, pero no reemplaza, el control 403 efectivo en la API.
+- Debe configurarse el UID verificado de `superadmin@nixinx.com` en el entorno seguro del deployment antes de habilitar Advanced; sin él se bloquea por defecto, sin conceder permiso por conveniencia.
+- No existe aún rol separado de soporte ni portal cliente. El backend solo admite los UIDs internos autorizados; la futura API M2M y portal del cliente serán superficies independientes.
+- V03 solo registra Firebase web config pública en estado draft. No se crean pagos, permisos Firebase cliente, dominios ni despliegues en este PR.
+
 ## Continuidad
 Antes de tocar código leer este documento, README y estado real de GitHub. Trabajar en rama, probar, PR. Nunca afirmar deploy o conexión de producción sin evidencia.
 
