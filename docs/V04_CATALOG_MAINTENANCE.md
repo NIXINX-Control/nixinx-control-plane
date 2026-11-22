@@ -36,3 +36,10 @@
 3. Definir manifiesto de módulos por versión de cada aplicación y procedimiento de registro/control sin diferencias manuales.
 4. Implementar después licencia por establecimiento conforme Charter §26.6; V04 mantiene el identificador histórico `tenantId_appId` del MVP para no romper datos y **no certifica cuota ni licencia multisede**.
 5. Revisar binding de hostname para IDs legados antes de activar configuraciones de HTL/HTW/CTY.
+
+## Corrección de acceso administrativo y dominio de pruebas — 2026-11-22
+
+- **Solo Google en la UI de NIXINX Control**: eliminado el formulario de correo/contraseña del panel corporativo. Firebase Authentication del proyecto `nixinx-control` mantiene Google habilitado y Email/Password inhabilitado según captura del propietario. La autenticación no asigna rol; backend comprueba UID allowlisted y deniega visitantes.
+- **Dominio estable** propuesto para el Preview: `control-preview.nixinx.org`, asignado **solo** a la rama V04 `feat/control-catalog-maintenance-v04` en el entorno **Preview**, no `All Branches` ni Production. Registrar en Firebase Authentication/Authorized domains cuando Vercel confirme DNS y vinculación. No volver a autorizar manualmente URLs de cada commit.
+- `control.nixinx.org` será destino de Production cuando exista aprobación posterior; acceso desde intranet `nixinx.org`, pero proyecto Vercel y backend de Control separados.
+- **ATENCIÓN**: dominio fijo de Preview **no aísla los datos**. El backend Firebase de pruebas segregado sigue siendo requisito antes de hacer CRUD; no alterar `CTY`, `HTL` ni `HTW` durante QA.
