@@ -19,6 +19,12 @@ MVP inicial en rama feat/mobile-control-plane-mvp-20261114. Sin configuración p
 5. Service-to-service authorization: tokens de aplicación con rotación, cachés de autorización cortas y revocación.
 6. Integración piloto con Production Control; pruebas end-to-end de suspensión sin pérdida de datos.
 7. Seguridad, retención/backup, App Store/Play Store con Capacitor.
+## Regla obligatoria de acceso por autorización explícita — 2026-11-22
+
+Google y Email/Password pueden crear una identidad de Firebase Authentication, pero **la creación de usuario, inicio de sesión o registro no autoriza acceso** a NIXINX Control ni a datos de ninguna empresa. Todo API administrativo se cierra por defecto para UID no autorizado; solo `NIXINX_ADMIN_UIDS` y `NIXINX_SUPERADMIN_UIDS` representan personal interno. Un usuario externo, aunque tenga ID token válido, debe recibir 403. El portal cliente futuro tendrá APIs separadas que exigirán membresía/rol activo explícito para su propio tenant y sede, nunca autoprovisionamiento de derechos.
+
+La base Firestore de Control tiene reglas cliente `deny all`; esa capa **no** protege automáticamente otras PWAs ni backends que usen Firebase Admin SDK. Cada app cliente necesitará autorización por tenant/sede/módulo/acción y reglas/controles backend, con pruebas negativas de sesión anónima, cuenta Google recién creada, otro tenant, permisos revocados, rutas API directas y URLs alternativas. Un módulo intencionalmente público por QR solo permitirá funciones específicas aprobadas con sesión limitada, nunca acceso general a los datos.
+
 ## Seguridad administrativa V03 (rama/PR, sin producción)
 - **Ambos roles** `admin` y `superadmin` pueden leer y editar `/api/admin/configurations` (Advanced); cada request verifica Firebase ID token y UID contra la allowlist de personal NIXINX. Los clientes no tienen acceso.
 - **Solo `superadmin` podrá conceder excepciones/exenciones de pago**, delimitadas por cliente, producto/servicio, fechas, justificación y auditoría. Este endpoint aún no existe y no se habilita por cambiar Configurations.
