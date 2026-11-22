@@ -1,5 +1,5 @@
 const EXPIRY_MILLISECONDS=30_000;
-const SBX_PROJECT=/^nixinx-[a-z0-9-]*-sbx-[0-9]{2}$/;
+const SBX_PROJECT=/^nixinx-corporate-sbx-[a-z0-9-]{2,12}$/;
 const ORG_ID=/^[a-z][a-z0-9-]{1,79}$/;
 export type SandboxLeaseBinding={tenantId:string;orgId:string;hostname:string};
 
