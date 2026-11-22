@@ -19,7 +19,7 @@ function toLocalInput(iso:string|undefined){
     ?new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16)
     :"";
 }
-const idPattern=/^[a-z][a-z0-9-]{1,38}$/;
+const idPattern=/^[a-z](?:[a-z0-9-]{0,37}[a-z0-9])$/;
 function label(row:CatalogRow){return row.name||row.id;}
 function friendlyError(error:unknown){return error instanceof Error?error.message:"Error al guardar";}
 
@@ -171,7 +171,7 @@ export default function CatalogManagement({
           <input
             readOnly={mode==="edit"||tab==="licenses"}
             required
-            pattern={tab==="licenses"?undefined:"[a-z][a-z0-9-]{1,38}"}
+            pattern={tab==="licenses"?undefined:"[a-z](?:[a-z0-9-]{0,37}[a-z0-9])"}
             value={tab==="licenses"?licenseId:(draft.id||"")}
             placeholder={tab==="licenses"?"cliente_aplicacion":tab==="modules"?"dashboard":"initiatives"}
             onChange={e=>set("id",e.target.value)}
