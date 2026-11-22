@@ -38,3 +38,6 @@ Antes de tocar código leer este documento, README y estado real de GitHub. Trab
 
 ## V03 — nuevo incremento (rama, no producción)
 Consultar [contrato global](https://github.com/NIXINX-Business-Transformation/nixinx-dwh/blob/main/docs/architecture/NIXINX_SOFTWARE_CONTROL_VERCEL_ARCHITECTURE_20261121.md) y [V03](V03_TENANT_CONFIGURATION.md). Catálogo borrador de configuración por cliente/app; no certifica conexión runtime, dominios ni revocación. Mantener app y datos cliente intactos. Siguiente: CI, preview aislado y verificación Firebase Control; no usar datos reales en pruebas.
+
+## V04 — CRUD lógico y módulos por aplicación
+Consultar [V04](V04_CATALOG_MAINTENANCE.md). IDs nuevos inmutables, transacciones para rechazar duplicados, nombres editables, archivos lógicos auditados. Módulos vinculados a app desde catálogo y seleccionables en licencias sin escribir IDs manualmente; backend valida existencia y estado. **Los IDs históricos CTY, HTL y HTW no se migran**. No usar Firebase del Preview con datos reales para probar CRUD. El manifiesto de módulos de cada aplicación y la autorización multisede siguen pendientes de integración y pruebas.
