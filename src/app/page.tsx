@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useRef,useState} from "react";
-import {GoogleAuthProvider,onAuthStateChanged,signInWithEmailAndPassword,signInWithPopup,signOut,User} from "firebase/auth";
+import {GoogleAuthProvider,onAuthStateChanged,signInWithPopup,signOut,User} from "firebase/auth";
 import {auth} from "@/lib/firebase-client";
 import Configurations from "@/components/configurations";
 import CatalogManagement from "@/components/catalog-management";
@@ -9,7 +9,7 @@ type RecordItem={id:string;name?:string;status?:string;description?:string;tenan
 type Data={tenants:RecordItem[];apps:RecordItem[];modules:RecordItem[];licenses:RecordItem[];logs:RecordItem[];viewerRole?:"admin"|"superadmin"};
 const empty:Data={tenants:[],apps:[],modules:[],licenses:[],logs:[]};type Tab="overview"|"tenants"|"apps"|"modules"|"licenses"|"configurations"|"audit";
 const tabs=[{id:"overview",title:"Inicio",icon:LayoutDashboard},{id:"tenants",title:"Clientes",icon:Building2},{id:"apps",title:"Aplicaciones",icon:Boxes},{id:"modules",title:"Módulos",icon:Puzzle},{id:"licenses",title:"Licencias",icon:ShieldCheck},{id:"configurations",title:"Configuración",icon:Settings},{id:"audit",title:"Auditoría",icon:ScrollText}] as const;
-export default function Home(){const authEpoch=useRef(0);const [user,setUser]=useState<User|null>(null),[checked,setChecked]=useState(false),[access,setAccess]=useState<"checking"|"allowed"|"denied"|"error">("checking"),[email,setEmail]=useState(""),[password,setPassword]=useState(""),[data,setData]=useState<Data>(empty),[tab,setTab]=useState<Tab>("overview"),[busy,setBusy]=useState(false),[error,setError]=useState(""),[reason,setReason]=useState(""),[transition,setTransition]=useState<string|null>(null);
+export default function Home(){const authEpoch=useRef(0);const [user,setUser]=useState<User|null>(null),[checked,setChecked]=useState(false),[access,setAccess]=useState<"checking"|"allowed"|"denied"|"error">("checking"),[data,setData]=useState<Data>(empty),[tab,setTab]=useState<Tab>("overview"),[busy,setBusy]=useState(false),[error,setError]=useState(""),[reason,setReason]=useState(""),[transition,setTransition]=useState<string|null>(null);
 useEffect(()=>onAuthStateChanged(auth,u=>{authEpoch.current+=1;setUser(u);setChecked(true);setData(empty);setAccess("checking");setTab("overview");setError("")}),[]);
 async function request(path:string,method="GET",body?:unknown){if(!user)throw new Error("Inicia sesión");const token=await user.getIdToken();const response=await fetch(path,{method,headers:{"authorization":"Bearer "+token,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,cache:"no-store"});const payload=await response.json();if(!response.ok){const error=new Error(payload.error||"Request failed") as Error&{status?:number};error.status=response.status;throw error;}return payload}
 async function load(){if(!user)return;const epoch=authEpoch.current;setBusy(true);try{const result=await request("/api/admin");if(epoch!==authEpoch.current)return;setData(result);setAccess("allowed");setError("")}catch(e){if(epoch!==authEpoch.current)return;const status=(e as Error&{status?:number}).status;setAccess(status===401||status===403?"denied":"error");setData(empty);setError((e as Error).message)}finally{if(epoch===authEpoch.current)setBusy(false)}}
@@ -17,7 +17,30 @@ useEffect(()=>{if(user)void load()},[user]);
 async function updateLicense(id:string,status:string){if(!reason.trim()){setError("Escribe un motivo para auditar este cambio");return}setBusy(true);try{await request("/api/admin/licenses/"+encodeURIComponent(id),"PATCH",{status,reason});setTransition(null);setReason("");await load()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
 
 if(!checked)return <main className="login"><p className="brand">NIXINX<span> Control</span></p><p className="muted">Comprobando sesión…</p></main>;
-if(!user)return <main className="login panel"><p className="eyebrow">ADMINISTRACIÓN SEGURA</p><h1 className="brand">NIXINX<span> Control</span></h1><p className="mutedline">Accede con tu cuenta administrativa autorizada de Firebase.</p><form className="stack" onSubmit={async e=>{e.preventDefault();setError("");setBusy(true);try{await signInWithEmailAndPassword(auth,email,password)}catch{setError("No se pudo iniciar sesión. Comprueba tus credenciales.")}finally{setBusy(false)}}}><label className="field">Correo electrónico<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="field">Contraseña<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="error" role="alert">{error}</p>}<button className="btn" disabled={busy}>Entrar a NIXINX Control</button></form><button className="btn secondary" disabled={busy} onClick={async()=>{setBusy(true);setError("");try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){const error=e as Error&{code?:string};setError(error.code==="auth/unauthorized-domain"?"Este dominio de prueba aún no está autorizado en Firebase Authentication. Usa correo y contraseña o solicita habilitar este Preview.":"No se pudo iniciar sesión con Google.")}finally{setBusy(false)}}}>Continuar con Google</button><p className="caption">Iniciar sesión no concede permisos. Solo los UID autorizados por NIXINX pueden utilizar este panel.</p></main>;
+if(!user)return <main className="login panel">
+  <p className="eyebrow">ADMINISTRACIÓN SEGURA</p>
+  <h1 className="brand">NIXINX<span> Control</span></h1>
+  <p className="mutedline">Acceso corporativo mediante Google. Solo las cuentas autorizadas por NIXINX podrán utilizar este panel.</p>
+  {error&&<p className="error" role="alert">{error}</p>}
+  <button className="btn" disabled={busy} onClick={async()=>{
+    setBusy(true);setError("");
+    try{
+      await signInWithPopup(auth,new GoogleAuthProvider());
+    }catch(e){
+      const error=e as Error&{code?:string};
+      if(error.code==="auth/popup-closed-by-user"||error.code==="auth/cancelled-popup-request"){
+        setError("Se canceló el acceso con Google.");
+      }else if(error.code==="auth/unauthorized-domain"){
+        setError("El dominio de esta versión no está autorizado en Firebase Authentication. Solicita autorizar el dominio exacto de Preview.");
+      }else if(error.code==="auth/popup-blocked"){
+        setError("El navegador bloqueó la ventana de Google. Permite ventanas emergentes para este dominio.");
+      }else{
+        setError("No fue posible iniciar sesión con Google. Verifica la configuración de autenticación.");
+      }
+    }finally{setBusy(false)}
+  }}>Continuar con Google</button>
+  <p className="caption">Iniciar sesión con Google no concede permisos. El servidor verifica el UID y el rol autorizado antes de mostrar información.</p>
+</main>;
 if(access==="checking")return <main className="login"><p className="brand">NIXINX<span> Control</span></p><p className="muted">Validando autorización de acceso…</p></main>;
 if(access==="denied")return <main className="login panel"><h1>Acceso no autorizado</h1><p className="mutedline">Esta cuenta no tiene permisos para utilizar NIXINX Control. Solicite acceso al administrador de NIXINX.</p><button className="btn secondary" onClick={()=>void signOut(auth)}>Cerrar sesión</button></main>;
 if(access==="error")return <main className="login panel"><h1>Servicio no disponible</h1><p className="mutedline">No fue posible verificar los permisos de esta cuenta. El acceso permanece bloqueado.</p><button className="btn" disabled={busy} onClick={()=>void load()}>Reintentar</button><button className="btn secondary" onClick={()=>void signOut(auth)}>Cerrar sesión</button></main>;
