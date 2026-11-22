@@ -57,3 +57,14 @@ export function installationAuthorized(
 export function supportReference():string{
  return "NX-"+randomBytes(5).toString("hex").toUpperCase();
 }
+
+export function moduleIsVerified(
+ request:ServiceEntitlementRequest,
+ record:Record<string,unknown>|undefined
+):boolean{
+ if(!request.moduleId)return true;
+ return Boolean(
+  record?.appId===request.appId && record?.moduleId===request.moduleId &&
+  record?.status==="active" && record?.verified===true
+ );
+}
