@@ -23,12 +23,14 @@ test("module selection rejects unknown, duplicated and invalid IDs",()=>{
   assert.throws(()=>normalizeSelectedModules(Array.from({length:101},(_,i)=>"module-"+i)));
 });
 test("licence modules must exist and be active in the selected application",()=>{
-  validateSelectedModules(["dashboard"],"initiatives",[{appId:"initiatives",moduleId:"dashboard",status:"active"}]);
-  assert.throws(()=>validateSelectedModules(["dashboard"],"supply",[{appId:"initiatives",moduleId:"dashboard",status:"active"}]));
-  assert.throws(()=>validateSelectedModules(["dashboard"],"initiatives",[{appId:"initiatives",moduleId:"dashboard",status:"retired"}]));
+  validateSelectedModules(["dashboard"],"initiatives",[{appId:"initiatives",moduleId:"dashboard",status:"active",verified:true}]);
+  assert.throws(()=>validateSelectedModules(["dashboard"],"supply",[{appId:"initiatives",moduleId:"dashboard",status:"active",verified:true}]));
+  assert.throws(()=>validateSelectedModules(["dashboard"],"initiatives",[{appId:"initiatives",moduleId:"dashboard",status:"retired",verified:true}]));
   assert.throws(()=>validateSelectedModules(["typo"],"initiatives",[undefined]));
+  assert.throws(()=>validateSelectedModules(["dashboard"],"initiatives",[{appId:"initiatives",moduleId:"dashboard",status:"active",verified:false}]));
 });
 test("catalog supports logical retirement without physical deletions",()=>{
+  assert.equal(acceptsCatalogStatus("modules","draft"),true);
   assert.equal(acceptsCatalogStatus("modules","retired"),true);
   assert.equal(acceptsCatalogStatus("apps","archived"),true);
   assert.equal(acceptsCatalogStatus("tenants","archived"),true);
