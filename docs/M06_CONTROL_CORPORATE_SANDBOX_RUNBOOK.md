@@ -79,3 +79,25 @@ La rama V05 ahora implementa `src/lib/corporate-preview-lease.ts`, respaldado po
 - **CI:** tests de política de lease (proyecto sandbox, org exacta, duración, denegación) y tests estructurales de `firestore.preview.rules`. **No equivalen** a pruebas Firebase Emulator ni E2E con GCP.
 
 **No desplegar a producción, no cambiar reglas originales de Nelcy, no crear IAM de larga duración por comodidad.**
+
+## M06-R1 — Recuperación tras creación parcial Control Sandbox (evidencia 2026-11-22)
+
+**Estado real comunicado por el propietario:** `nixinx-control-sbx-26` project number `1080730147334`, ACTIVE, parent folder `410789317555`. `gcloud` opera como `admin@nixinx.com`; `firebase login:list` indica "No authorized accounts", aunque `firebase projects:list` devuelve cuatro proyectos anteriores. **Este último hecho es compatible con credenciales ADC de Cloud Shell y no prueba una sesión explícita de Firebase CLI**. La conversión del nuevo proyecto GCP a Firebase y la creación de Corporate Sandbox todavía NO están verificadas.
+
+**Causa del prompt equivocado:** script inicial usaba `firebase projects:addfirebase --project="$p"`; en el subcomando `projects:addfirebase [projectId]` el proyecto objetivo es **argumento posicional**, por lo que `--project` no lo fija y abre selector (el usuario vio `gen-lang-client-...`, que NO debe seleccionarse). Corregido el código versionado a `firebase projects:addfirebase "$p"`.
+
+**No volver a ejecutar `bootstrap-corporate-sandbox.sh --apply`**: su guardia de preflight impide reutilizar proyectos existentes, evitando sobrescritura. Recuperar desde el estado parcial de forma controlada:
+
+```bash
+# Cloud Shell activo: verificar proyecto previo, sin cambios.
+gcloud projects describe nixinx-control-sbx-26 \
+  --format='yaml(projectId,projectNumber,parent,lifecycleState)'
+firebase login --no-localhost
+firebase login:list
+# Solo después de verificar cuenta admin@nixinx.com:
+firebase projects:addfirebase nixinx-control-sbx-26
+```
+
+Si `projects:addfirebase` falla o solicita elegir un proyecto distinto, STOP y recoger mensaje exacto; no crear otro proyecto GCP ni editar permisos por intuición. Tras éxito, verificar `firebase projects:list` y estado Firestore de Control Sandbox antes de continuar sus pasos de setup; Corporate Sandbox **se creará luego, separado y con guardia**. La recuperación no debe cambiar `nixinx-control`, `nelcy-corporate-group`, CTY/HTL/HTW ni facturación.
+
+Referencia oficial: `firebase projects:addfirebase [projectId]` en Firebase CLI; Firebase CLI puede usar ADC incluso cuando `firebase login:list` está vacío, por lo que se confirma identidad explícita de Firebase antes de una mutación.
