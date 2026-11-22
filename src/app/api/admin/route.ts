@@ -51,9 +51,11 @@ export async function POST(req:NextRequest){
       const current=await tx.get(ref);
       if(current.exists)throw new ApiError(409,"Identifier already exists and cannot be reused");
       if(kind==="tenants"||kind==="apps"){
-        // Legacy customer IDs were stored uppercase (HTL/HTW/CTY): do not generate lower-case aliases for them.
-        const legacy=await tx.get(db.collection(collection).doc(id.toUpperCase()));
-        if(legacy.exists)throw new ApiError(409,"An existing legacy identifier uses the same code");
+        // Historical IDs may have any case. Preserve them and prevent case-only duplicate identities.
+        const existing=await tx.get(db.collection(collection).limit(501));
+        if(existing.size>500)throw new ApiError(409,"Catalog too large for case-insensitive identity precheck");
+        if(existing.docs.some(doc=>doc.id.toLowerCase()===id.toLowerCase()))
+          throw new ApiError(409,"Identifier already exists (case-insensitive) and cannot be reused");
       }
       if(kind==="modules"){
         const app=await tx.get(db.collection("apps").doc(appId));
