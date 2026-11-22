@@ -8,3 +8,6 @@ API admin requiere Firebase ID token de un administrador listado. Firestore clie
 UI navegable + CRUD inicial + auditoría y decisión de licencia. Sin facturación real, scheduler, conciliación o despliegue productivo. No se cargan datos demo.
 ## Fuente de verdad
 [docs/FUENTE_DE_VERDAD.md](docs/FUENTE_DE_VERDAD.md)
+
+## Configuraciones V03
+Catálogo administrado de configuraciones web Firebase por cliente y aplicación, en estado borrador. Ver [V03](docs/V03_TENANT_CONFIGURATION.md). No habilita conexiones externas ni sustituye el contrato de licenciamiento.

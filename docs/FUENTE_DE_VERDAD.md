@@ -21,3 +21,6 @@ MVP inicial en rama feat/mobile-control-plane-mvp-20261114. Sin configuración p
 7. Seguridad, retención/backup, App Store/Play Store con Capacitor.
 ## Continuidad
 Antes de tocar código leer este documento, README y estado real de GitHub. Trabajar en rama, probar, PR. Nunca afirmar deploy o conexión de producción sin evidencia.
+
+## V03 — nuevo incremento (rama, no producción)
+Consultar [contrato global](https://github.com/NIXINX-Business-Transformation/nixinx-dwh/blob/main/docs/architecture/NIXINX_SOFTWARE_CONTROL_VERCEL_ARCHITECTURE_20261121.md) y [V03](V03_TENANT_CONFIGURATION.md). Catálogo borrador de configuración por cliente/app; no certifica conexión runtime, dominios ni revocación. Mantener app y datos cliente intactos. Siguiente: CI, preview aislado y verificación Firebase Control; no usar datos reales en pruebas.
