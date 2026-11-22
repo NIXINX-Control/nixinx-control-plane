@@ -3,6 +3,7 @@ import {db,fail,ApiError} from "@/lib/server";
 import {accessDecision,License} from "@/lib/lifecycle";
 import {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference} from "@/lib/service-entitlement";
 import {syncCorporatePreviewLease} from "@/lib/corporate-preview-lease";
+import {supplyVercelOidcForRequest} from "@/lib/keyless-google-credential";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 
@@ -12,6 +13,7 @@ function reply(allowed:boolean,referenceCode:string,status=200){
 export async function POST(req:NextRequest){
  const referenceCode=supportReference();
  try{
+  supplyVercelOidcForRequest(req);
   const authorized=verifyServiceToken(req.headers.get("authorization"),process.env.NIXINX_CONTROL_CORPORATE_SERVICE_TOKEN);
   if(!authorized)throw new ApiError(401,"Service authentication required");
   const b=parseServiceRequest(await req.json().catch(()=>null));
