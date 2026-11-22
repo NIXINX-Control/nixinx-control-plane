@@ -16,10 +16,14 @@ export async function POST(req:NextRequest){
  try{
   const {uid}=await staffIdentity(req);
   const input=validateInstallationInput(await req.json().catch(()=>null));
-  // Request only a pinned NIXINX-owned Corporate hostname; never arbitrary URLs.
+  const bypass=process.env.NIXINX_CORPORATE_PREVIEW_PROTECTION_BYPASS;
+  const headers:Record<string,string>={"Accept":"application/json"};
+  if(process.env.VERCEL_ENV==="preview"&&input.hostname==="nelcy-preview.corporate.nixinx.app"&&bypass){
+   headers["x-vercel-protection-bypass"]=bypass;
+  }
   const check=await fetch("https://"+input.hostname+"/api/internal/installation-manifest",{
    method:"GET",redirect:"error",cache:"no-store",signal:AbortSignal.timeout(5000),
-   headers:{"Accept":"application/json"}
+   headers
   }).catch(()=>{throw new ApiError(503,"Corporate Preview is not available for verification")});
   if(!check.ok)throw new ApiError(409,"Corporate Preview is not ready for verification");
   const claimed=await check.json().catch(()=>null);
