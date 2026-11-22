@@ -5,7 +5,7 @@ import type {User} from "firebase/auth";
 export type CatalogRow={
   id:string;name?:string;status?:string;description?:string;
   tenantId?:string;appId?:string;moduleId?:string;validUntil?:string;
-  graceDays?:number;modules?:string[];
+  graceDays?:number;modules?:string[];verified?:boolean;
 };
 export type CatalogData={
   tenants:CatalogRow[];apps:CatalogRow[];modules:CatalogRow[];licenses:CatalogRow[];
@@ -42,7 +42,7 @@ export default function CatalogManagement({
   const rows=data[tab]||[];
   const apps=data.apps.filter(a=>a.status!=="archived");
   const tenants=data.tenants.filter(t=>t.status==="active");
-  const appModules=useMemo(()=>data.modules.filter(m=>m.appId===draft.appId&&m.status==="active"),[data.modules,draft.appId]);
+  const appModules=useMemo(()=>data.modules.filter(m=>m.appId===draft.appId&&m.status==="active"&&m.verified===true),[data.modules,draft.appId]);
   const licenseId=draft.tenantId&&draft.appId?draft.tenantId+"_"+draft.appId:"";
 
   function set(key:string,value:string){setDraft(d=>({...d,[key]:value}));}
@@ -187,7 +187,7 @@ export default function CatalogManagement({
           {mode==="edit"&&<label className="field">Estado (baja lógica)
             <select value={draft.status||"active"} onChange={e=>set("status",e.target.value)}>
               <option value="active">Activo</option>
-              {tab==="modules"?<option value="retired">Retirado</option>:<option value="archived">Archivado</option>}
+              {tab==="modules"?<><option value="draft">Borrador</option><option value="retired">Retirado</option>{editing?.verified===true&&<option value="active">Activo · manifiesto verificado</option>}</>:<option value="archived">Archivado</option>}
             </select>
           </label>}
         </>}
@@ -201,7 +201,7 @@ export default function CatalogManagement({
           <div className="field full">
             <strong>Módulos registrados en la aplicación</strong>
             <p className="caption">Selecciona módulos reales del catálogo. No se aceptan nombres escritos libremente.</p>
-            {appModules.length===0?<p className="caption">No hay módulos activos registrados para esta aplicación.</p>:
+            {appModules.length===0?<p className="caption">No hay módulos verificados por la aplicación. Los módulos registrados manualmente permanecen en borrador hasta validar el manifiesto del código.</p>:
               <div className="stack">
                 {appModules.map(m=><label key={m.id} className="row" style={{gap:12}}>
                   <input type="checkbox" checked={selectedModules.includes(m.moduleId||"")} disabled={busy}
@@ -231,7 +231,7 @@ export default function CatalogManagement({
           <div className="caption">ID: {tab==="modules"?row.moduleId:row.id}
             {row.appId?" · Aplicación: "+row.appId:""}
             {row.tenantId?" · Cliente: "+row.tenantId:""}</div>
-          {tab==="modules"&&<div className="caption">Aplicación: {data.apps.find(a=>a.id===row.appId)?.name||row.appId}</div>}
+          {tab==="modules"&&<div className="caption">Aplicación: {data.apps.find(a=>a.id===row.appId)?.name||row.appId} · Manifiesto: {row.verified?"Verificado":"Pendiente"}</div>}
           {row.validUntil&&<div className="caption">Vigente hasta: {new Date(row.validUntil).toLocaleString("es-CA")} · Gracia: {row.graceDays||0} días · Módulos: {(row.modules||[]).join(", ")||"Ninguno"}</div>}
           {row.status&&<div className="caption">Estado: {row.status}</div>}
         </div>
