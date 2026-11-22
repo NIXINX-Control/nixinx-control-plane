@@ -7,26 +7,34 @@ const source=fs.readFileSync(new URL("../src/lib/staff-roles.ts",import.meta.url
 const compiled=ts.transpileModule(source,{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}
 }).outputText;
-const {resolveStaffRole}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
+const {resolveStaffRole,canManageAdvanced,canGrantPaymentExemption}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 
-test("Advanced is denied if superadmin UID configuration is absent",()=>{
-  assert.equal(resolveStaffRole("super-uid","admin-uid,super-uid",undefined),"admin");
-  assert.equal(resolveStaffRole("super-uid",undefined,undefined),null);
+test("missing privileged allowlist does not prevent authorized admins from using Advanced",()=>{
+  assert.equal(resolveStaffRole("admin-uid","admin-uid",undefined),"admin");
+  assert.equal(resolveStaffRole("unknown-uid",undefined,undefined),null);
+  assert.equal(canManageAdvanced("admin"),true);
 });
 
-test("Only configured Firebase Auth UID may become superadmin",()=>{
+test("UID-only role resolution and no domain-based grants",()=>{
   assert.equal(resolveStaffRole("super-uid","admin-uid","super-uid"),"superadmin");
   assert.equal(resolveStaffRole("admin-uid","admin-uid","super-uid"),"admin");
-  assert.equal(resolveStaffRole("outsider", "admin-uid", "super-uid"),null);
+  assert.equal(resolveStaffRole("outsider","admin-uid","super-uid"),null);
+  assert.equal(resolveStaffRole("admin@nixinx.com","uid-a","uid-b"),null);
+  assert.equal(resolveStaffRole(" uid-a ","uid-a","uid-b"),null);
 });
 
-test("Superadmin takes precedence if UID appears in both lists",()=>{
+test("superadmin role takes precedence if UID is in both allowlists",()=>{
   assert.equal(resolveStaffRole("super-uid","admin-uid,super-uid","super-uid"),"superadmin");
 });
 
-test("UID match is exact, whitespace trimmed; email domain is irrelevant",()=>{
-  assert.equal(resolveStaffRole(" uid-a ","uid-a","uid-b"),null);
-  assert.equal(resolveStaffRole("uid-a","uid-a, admin@nixinx.com"," uid-b, uid-c "),"admin");
-  assert.equal(resolveStaffRole("uid-b","uid-a"," uid-b, uid-c "),"superadmin");
-  assert.equal(resolveStaffRole("admin@nixinx.com","uid-a","uid-b"),null);
+test("both NIXINX staff roles can manage Advanced, clients cannot",()=>{
+  assert.equal(canManageAdvanced("admin"),true);
+  assert.equal(canManageAdvanced("superadmin"),true);
+  assert.equal(canManageAdvanced(null),false);
+});
+
+test("only superadmin can grant commercial payment exceptions",()=>{
+  assert.equal(canGrantPaymentExemption("admin"),false);
+  assert.equal(canGrantPaymentExemption("superadmin"),true);
+  assert.equal(canGrantPaymentExemption(null),false);
 });
