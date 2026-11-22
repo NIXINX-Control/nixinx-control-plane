@@ -22,7 +22,7 @@ export async function superadminUser(req:NextRequest){
  if(staff.role!=="superadmin")throw new ApiError(403,"NIXINX superadministrator required");
  return staff.uid;
 }
-export function ok(data:unknown,status=200){return Response.json(data,{status})}
-export function fail(error:unknown){const e=error as Error;return Response.json({error:e instanceof ApiError?e.message:"Server error"},{status:e instanceof ApiError?e.status:500})}
+export function ok(data:unknown,status=200){return Response.json(data,{status,headers:{"Cache-Control":"private, no-store"}})}
+export function fail(error:unknown){const e=error as Error;return Response.json({error:e instanceof ApiError?e.message:"Server error"},{status:e instanceof ApiError?e.status:500,headers:{"Cache-Control":"private, no-store"}})}
 export function identifier(value:unknown){if(typeof value!=="string"||! /^[a-zA-Z0-9_-]{2,80}$/.test(value))throw new ApiError(400,"Invalid identifier");return value}
 export function str(value:unknown,max=120){if(typeof value!=="string"||!value.trim()||value.length>max)throw new ApiError(400,"Invalid text");return value.trim()}
