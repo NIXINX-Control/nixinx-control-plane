@@ -14,6 +14,12 @@ export async function POST(req:NextRequest){
   const authorized=verifyServiceToken(req.headers.get("authorization"),process.env.NIXINX_CONTROL_CORPORATE_SERVICE_TOKEN);
   if(!authorized)throw new ApiError(401,"Service authentication required");
   const b=parseServiceRequest(await req.json().catch(()=>null));
+  // One credential is scoped to this preview customer, never all Corporate tenants.
+  if(b.environment!=="preview"||
+     !process.env.NIXINX_CONTROL_CORPORATE_TENANT_ID||
+     b.tenantId!==process.env.NIXINX_CONTROL_CORPORATE_TENANT_ID){
+    return reply(false,referenceCode,403);
+  }
   if(req.headers.get("content-type")?.split(";")[0].trim()!=="application/json")
     throw new ApiError(415,"JSON required");
   const [installation,tenant,app,license]=await Promise.all([
