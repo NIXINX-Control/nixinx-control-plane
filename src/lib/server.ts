@@ -4,7 +4,17 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {NextRequest} from "next/server";
 import {resolveStaffRole, type NixinxStaffRole} from "@/lib/staff-roles";
-export const adminApp=getApps()[0]??initializeApp(process.env.FIREBASE_CLIENT_EMAIL&&process.env.FIREBASE_PRIVATE_KEY?{credential:cert({projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,privateKey:process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g,"\n")})}:{credential:applicationDefault()});
+import {vercelPreviewGoogleCredential} from "@/lib/keyless-google-credential";
+// Preview keyless federation takes precedence over any legacy environment credentials.
+const useKeylessPreview=Boolean(process.env.NIXINX_CONTROL_WIF_PROVIDER);
+export const adminApp=getApps()[0]??initializeApp(
+ useKeylessPreview?{
+  projectId:process.env.FIREBASE_PROJECT_ID,
+  credential:vercelPreviewGoogleCredential()
+ }:process.env.FIREBASE_CLIENT_EMAIL&&process.env.FIREBASE_PRIVATE_KEY?{
+  credential:cert({projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,privateKey:process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g,"\n")})
+ }:{credential:applicationDefault()}
+);
 export const db=getFirestore(adminApp);
 export {FieldValue,Timestamp};
 export class ApiError extends Error {constructor(public status:number,message:string){super(message)}}
