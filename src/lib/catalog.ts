@@ -25,17 +25,17 @@ export function normalizeSelectedModules(value:unknown):string[] {
 export function validateSelectedModules(
   ids:readonly string[],
   appId:string,
-  records:ReadonlyArray<{appId?:unknown;moduleId?:unknown;status?:unknown}|null|undefined>
+  records:ReadonlyArray<{appId?:unknown;moduleId?:unknown;status?:unknown;verified?:unknown}|null|undefined>
 ):void {
   if(ids.length!==records.length)throw new Error("Module selection could not be validated");
   for(let i=0;i<ids.length;i++){
     const entry=records[i];
-    if(!entry || entry.appId!==appId || entry.moduleId!==ids[i] || entry.status!=="active"){
+    if(!entry || entry.appId!==appId || entry.moduleId!==ids[i] || (entry.status!=="active" || entry.verified!==true)){
       throw new Error("Module not registered and active in this application");
     }
   }
 }
 
 export function acceptsCatalogStatus(kind:"tenants"|"apps"|"modules",status:unknown):boolean{
-  return kind==="modules"?status==="active"||status==="retired":status==="active"||status==="archived";
+  return kind==="modules"?status==="draft"||status==="active"||status==="retired":status==="active"||status==="archived";
 }
