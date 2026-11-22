@@ -1,12 +1,12 @@
 import {NextRequest} from "next/server";
-import {superadminUser,db,ApiError,fail} from "@/lib/server";
+import {adminUser,db,ApiError,fail} from "@/lib/server";
 import {parseConfiguration,assertConfigurationBinding,assertFirebaseOwnership,ConfigurationError} from "@/lib/tenant-configuration";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 function response(data:unknown,status=200){return Response.json(data,{status,headers:{"Cache-Control":"private, no-store"}})}
 export async function GET(req:NextRequest){
   try{
-    await superadminUser(req);
+    await adminUser(req);
     const snap=await db.collection("configurations").orderBy("hostname").limit(201).get();
     return response({configurations:snap.docs.slice(0,200).map(doc=>({id:doc.id,...parseConfiguration({
       tenantId:doc.data().tenantId,appId:doc.data().appId,hostname:doc.data().hostname,firebase:doc.data().firebase,orgId:doc.data().orgId
@@ -15,7 +15,7 @@ export async function GET(req:NextRequest){
 }
 export async function POST(req:NextRequest){
   try{
-    const actor=await superadminUser(req);
+    const actor=await adminUser(req);
     const config=parseConfiguration(await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")}));
     const ref=db.collection("configurations").doc(config.hostname);
     const ownerRef=db.collection("firebaseProjectOwners").doc(config.firebase.projectId);
