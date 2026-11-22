@@ -20,9 +20,10 @@ MVP inicial en rama feat/mobile-control-plane-mvp-20261114. Sin configuración p
 6. Integración piloto con Production Control; pruebas end-to-end de suspensión sin pérdida de datos.
 7. Seguridad, retención/backup, App Store/Play Store con Capacitor.
 ## Seguridad administrativa V03 (rama/PR, sin producción)
-- Solo UIDs de `NIXINX_SUPERADMIN_UIDS` acceden a lectura y escritura de `/api/admin/configurations`; `NIXINX_ADMIN_UIDS` administra catálogo/licencias sin permiso Advanced. El UID superadmin no requiere duplicarse en la lista de admin.
-- La UI de Configurations se muestra únicamente tras respuesta autenticada del servidor `viewerRole=superadmin`; no se determina por email. Esto complementa, pero no reemplaza, el control 403 efectivo en la API.
-- Debe configurarse el UID verificado de `superadmin@nixinx.com` en el entorno seguro del deployment antes de habilitar Advanced; sin él se bloquea por defecto, sin conceder permiso por conveniencia.
+- **Ambos roles** `admin` y `superadmin` pueden leer y editar `/api/admin/configurations` (Advanced); cada request verifica Firebase ID token y UID contra la allowlist de personal NIXINX. Los clientes no tienen acceso.
+- **Solo `superadmin` podrá conceder excepciones/exenciones de pago**, delimitadas por cliente, producto/servicio, fechas, justificación y auditoría. Este endpoint aún no existe y no se habilita por cambiar Configurations.
+- La UI de Configurations se muestra cuando la respuesta autenticada del servidor es `viewerRole=admin` o `viewerRole=superadmin`. Las peticiones API administrativas siempre validan la identidad en servidor, no el email visible.
+- Deben configurarse los UIDs reales de `admin@nixinx.com` en `NIXINX_ADMIN_UIDS` y de `superadmin@nixinx.com` en `NIXINX_SUPERADMIN_UIDS` (en entorno seguro). Advanced funciona con cualquiera de esos roles; sin UID autorizado se deniega. Las excepciones de pago se bloquearán por defecto sin superadmin.
 - No existe aún rol separado de soporte ni portal cliente. El backend solo admite los UIDs internos autorizados; la futura API M2M y portal del cliente serán superficies independientes.
 - V03 solo registra Firebase web config pública en estado draft. No se crean pagos, permisos Firebase cliente, dominios ni despliegues en este PR.
 
