@@ -1,6 +1,6 @@
 // Catalog references are immutable. Names may be updated without breaking licenses.
 // New IDs are DNS-safe lowercase slugs. Existing legacy IDs remain unchanged.
-export const NEW_ID_PATTERN=/^[a-z][a-z0-9-]{1,62}$/;
+export const NEW_ID_PATTERN=/^[a-z][a-z0-9-]{1,38}$/;
 export const MODULE_ID_PATTERN=/^[a-z][a-z0-9-]{1,62}$/;
 export const MAX_LICENSE_MODULES=100;
 
