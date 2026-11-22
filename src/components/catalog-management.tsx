@@ -186,8 +186,9 @@ export default function CatalogManagement({
           </label>}
           {mode==="edit"&&<label className="field">Estado (baja lógica)
             <select value={draft.status||"active"} onChange={e=>set("status",e.target.value)}>
-              <option value="active">Activo</option>
-              {tab==="modules"?<><option value="draft">Borrador</option><option value="retired">Retirado</option>{editing?.verified===true&&<option value="active">Activo · manifiesto verificado</option>}</>:<option value="archived">Archivado</option>}
+              {tab==="modules"
+                ?<><option value="draft">Borrador</option>{editing?.verified===true&&<option value="active">Activo · manifiesto verificado</option>}<option value="retired">Retirado</option></>
+                :<><option value="active">Activo</option><option value="archived">Archivado</option></>}
             </select>
           </label>}
         </>}
