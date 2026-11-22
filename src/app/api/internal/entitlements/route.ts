@@ -1,7 +1,7 @@
 import {NextRequest} from "next/server";
 import {db,fail,ApiError} from "@/lib/server";
 import {accessDecision,License} from "@/lib/lifecycle";
-import {verifyServiceToken,parseServiceRequest,installationAuthorized,supportReference} from "@/lib/service-entitlement";
+import {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference} from "@/lib/service-entitlement";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 
@@ -22,13 +22,14 @@ export async function POST(req:NextRequest){
   }
   if(req.headers.get("content-type")?.split(";")[0].trim()!=="application/json")
     throw new ApiError(415,"JSON required");
-  const [installation,tenant,app,license]=await Promise.all([
+  const [installation,tenant,app,license,moduleRecord]=await Promise.all([
     db.collection("appInstallations").doc(b.hostname).get(),
     db.collection("tenants").doc(b.tenantId).get(),
     db.collection("apps").doc(b.appId).get(),
-    db.collection("licenses").doc(b.tenantId+"_"+b.appId).get()
+    db.collection("licenses").doc(b.tenantId+"_"+b.appId).get(),
+    b.moduleId?db.collection("appModules").doc(b.appId+"."+b.moduleId).get():Promise.resolve(null)
   ]);
-  const valid=installationAuthorized(b,installation.data(),tenant.data(),app.data());
+  const valid=installationAuthorized(b,installation.data(),tenant.data(),app.data()) && moduleIsVerified(b,moduleRecord?.data());
   const decision=valid?accessDecision(license.exists?license.data() as License:null,new Date(),b.moduleId):{allowed:false,reason:"INSTALLATION_NOT_AUTHORIZED"};
   if(!decision.allowed){
     // No payment, license or tenant details are included in the client response.
@@ -36,7 +37,10 @@ export async function POST(req:NextRequest){
   }
   return reply(decision.allowed,referenceCode);
  }catch(e){
-  if(e instanceof ApiError&&e.status===401) return reply(false,referenceCode,401);
+  if(e instanceof ApiError&&e.status===401){
+    console.warn("nixinx_entitlement_denied",JSON.stringify({referenceCode,reason:"INVALID_SERVICE_CREDENTIAL"}));
+    return reply(false,referenceCode,401);
+  }
   if(e instanceof Error && /Invalid request|Invalid service scope|Invalid module|Invalid site/.test(e.message))
     return reply(false,referenceCode,400);
   console.error("nixinx_entitlement_error",JSON.stringify({referenceCode,error:"UNAVAILABLE"}));
