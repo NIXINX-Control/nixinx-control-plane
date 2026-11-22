@@ -41,6 +41,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
       const current=await tx.get(ref);
       if(!current.exists)throw new ApiError(404,"Catalog record missing");
       const previous=current.data()!;
+      if(kind==="modules" && changes.status==="active" && previous.verified!==true)throw new ApiError(409,"Module must match a verified application manifest before activation");
       if(kind==="modules" && docId!==previous.appId+"."+previous.moduleId)
         throw new ApiError(409,"Module reference inconsistent");
 
