@@ -45,3 +45,7 @@ export function assertConfigurationBinding(config:TenantConfiguration,tenant:Rec
     if(prior.status!=="draft")reject("Only draft configurations can be edited");
   }
 }
+
+export function assertFirebaseOwnership(config:TenantConfiguration,owner:Record<string,unknown>|undefined){
+  if(owner&&(owner.tenantId!==config.tenantId||owner.projectId!==config.firebase.projectId))reject("Firebase project is already registered to another client or has an invalid owner");
+}

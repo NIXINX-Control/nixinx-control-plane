@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {adminUser,db,ApiError,fail} from "@/lib/server";
-import {parseConfiguration,assertConfigurationBinding,ConfigurationError} from "@/lib/tenant-configuration";
+import {parseConfiguration,assertConfigurationBinding,assertFirebaseOwnership,ConfigurationError} from "@/lib/tenant-configuration";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 function response(data:unknown,status=200){return Response.json(data,{status,headers:{"Cache-Control":"private, no-store"}})}
@@ -18,13 +18,16 @@ export async function POST(req:NextRequest){
     const actor=await adminUser(req);
     const config=parseConfiguration(await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")}));
     const ref=db.collection("configurations").doc(config.hostname);
+    const ownerRef=db.collection("firebaseProjectOwners").doc(config.firebase.projectId);
     const at=new Date().toISOString();
     await db.runTransaction(async tx=>{
-      const [tenant,app,prior]=await Promise.all([
+      const [tenant,app,prior,owner]=await Promise.all([
         tx.get(db.collection("tenants").doc(config.tenantId)),
-        tx.get(db.collection("apps").doc(config.appId)),tx.get(ref)
+        tx.get(db.collection("apps").doc(config.appId)),tx.get(ref),tx.get(ownerRef)
       ]);
       assertConfigurationBinding(config,tenant.data(),app.data(),prior.data());
+      assertFirebaseOwnership(config,owner.data());
+      if(!owner.exists)tx.create(ownerRef,{tenantId:config.tenantId,projectId:config.firebase.projectId,createdAt:at});
       if(prior.exists){tx.set(ref,{...config,status:"draft",createdAt:prior.data()?.createdAt??at,updatedAt:at});}
       else{tx.create(ref,{...config,status:"draft",createdAt:at,updatedAt:at});}
       tx.create(db.collection("audit").doc(),{actor,action:prior.exists?"UPDATE_CONFIGURATION_DRAFT":"CREATE_CONFIGURATION_DRAFT",target:config.hostname,at});
