@@ -4,7 +4,7 @@ import fs from "node:fs";
 import ts from "typescript";
 const src=fs.readFileSync(new URL("../src/lib/service-entitlement.ts",import.meta.url),"utf8");
 const js=ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {verifyServiceToken,parseServiceRequest,installationAuthorized,supportReference}=await import("data:text/javascript;base64,"+Buffer.from(js).toString("base64"));
+const {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference}=await import("data:text/javascript;base64,"+Buffer.from(js).toString("base64"));
 const secret="a-private-secret-for-nixinx-testing-only-"+ "x".repeat(20);
 const request={tenantId:"nelcy",appId:"corporate",hostname:"nelcy-preview.corporate.nixinx.app",environment:"preview"};
 
@@ -40,4 +40,13 @@ test("deny unless verified installation, active tenant/app and exact environment
 });
 test("support code does not contain a commercial reason",()=>{
  assert.match(supportReference(),/^NX-[A-F0-9]{10}$/);
+});
+
+test("a license module needs a manifest-verified active module in Corporate",()=>{
+ const req={...request,moduleId:"dashboard"};
+ assert.equal(moduleIsVerified(req,{appId:"corporate",moduleId:"dashboard",status:"active",verified:true}),true);
+ assert.equal(moduleIsVerified(req,{appId:"corporate",moduleId:"dashbord",status:"active",verified:true}),false);
+ assert.equal(moduleIsVerified(req,{appId:"corporate",moduleId:"dashboard",status:"draft",verified:false}),false);
+ assert.equal(moduleIsVerified(req,{appId:"supply",moduleId:"dashboard",status:"active",verified:true}),false);
+ assert.equal(moduleIsVerified(req,undefined),false);
 });
