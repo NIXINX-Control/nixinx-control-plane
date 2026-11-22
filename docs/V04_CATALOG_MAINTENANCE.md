@@ -11,7 +11,7 @@
 
 ## Contrato implementado en la rama
 
-1. **Nuevo ID de cliente/aplicación/módulo:** minúsculas, números y guiones, longitud 2–63, inicia con letra. Es única clave técnica, no se puede editar. La API comprueba duplicados por ruta y además el alias mayúsculo de un ID legado antes del `tx.create` transaccional. **Los IDs existentes mayúsculos se preservan.**
+1. **Nuevo ID de cliente/aplicación/módulo:** minúsculas, números y guiones, longitud 2–39 (protege el ID compuesto actual de licencia `tenantId_appId`, máximo 80 caracteres), inicia con letra. Es única clave técnica, no se puede editar. La API comprueba duplicados por ruta y además el alias mayúsculo de un ID legado antes del `tx.create` transaccional. **Los IDs existentes mayúsculos se preservan.**
 2. **Nombre visible:** texto comercial editable sin alterar el ID ni las relaciones. Mantenimiento requiere motivo y crea auditoría; no sobrescribe historia.
 3. **Módulos por aplicación:** colección `appModules` con ID físico `appId.moduleId`, y campos `appId, moduleId, name, status, verified`. **El alta manual queda en `draft, verified:false`**; no autoriza funciones. Un mismo `moduleId` puede existir en varias aplicaciones, pero la licencia solo puede elegir los de su propia aplicación si está en estado `active` y `verified:true` confirmado por un manifiesto de código de la aplicación. **V04 todavía no incorpora la importación/verificación del manifiesto y por ello NO permite activar módulos nuevos ni venderlos como disponibles.**
 4. **Licencia:** ID derivado inmutable `tenantId_appId`; no se teclea. Los selectores Cliente/Aplicación no se cambian tras crear. Fechas, gracia y selección de módulos son editables con motivo auditado. Cambios de estado mantienen su API/maquina de estados separada.
