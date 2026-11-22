@@ -64,7 +64,7 @@ for spec in "$CONTROL_PROJECT|NIXINX Control Sandbox" "$CORPORATE_PROJECT|NIXINX
   gcloud projects create "$p" --folder="$TEST_FOLDER" --name="$display" ||
     fail "No se pudo crear $p (si el ID está ocupado, elige otro con sufijo -sbx-)"
   echo "=== ADD FIREBASE: $p ==="
-  firebase projects:addfirebase --project="$p" || fail "Proyecto creado, pero Firebase pendiente para $p; no reintentar creación completa"
+  firebase projects:addfirebase "$p" || fail "Proyecto creado, pero Firebase pendiente para $p; no reintentar creación completa"
   echo "=== CREATE DEFAULT FIRESTORE: $p ==="
   gcloud firestore databases create --database='(default)' --location="$LOCATION" --type=firestore-native --project="$p" ||
     fail "Proyecto/Firebase creados, pero Firestore pendiente para $p; revisar permisos/billing sin reutilizar producción"
