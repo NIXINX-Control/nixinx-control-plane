@@ -9,7 +9,7 @@ const {isNewCatalogId,appModuleDocId,normalizeSelectedModules,validateSelectedMo
 
 test("new IDs are lowercase, stable and domain-safe; existing uppercase IDs are not migrated",()=>{
   for(const id of ["initiatives","production-control","htl"]) assert.equal(isNewCatalogId(id),true);
-  for(const id of ["Initiatives","HTL","app_test","foo.bar","x",""]) assert.equal(isNewCatalogId(id),false);
+  for(const id of ["Initiatives","HTL","app_test","foo.bar","x","", "a".repeat(40)]) assert.equal(isNewCatalogId(id),false);
 });
 test("module document identifier is unique across apps",()=>{
   assert.equal(appModuleDocId("initiatives","dashboard"),"initiatives.dashboard");
