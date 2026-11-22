@@ -36,7 +36,7 @@ export async function POST(req:NextRequest){
     let record:Record<string,unknown>={};
     if(kind==="tenants")record={name:str(body.name),status:"active",createdAt:at};
     if(kind==="apps")record={name:str(body.name),description:typeof body.description==="string"?body.description.trim().slice(0,300):"",status:"active",createdAt:at};
-    if(kind==="modules")record={appId,moduleId:id,name:str(body.name),status:"active",createdAt:at};
+    if(kind==="modules")record={appId,moduleId:id,name:str(body.name),status:"draft",verified:false,createdAt:at};
     let modules:string[]=[];
     if(kind==="licenses"){
       if(id!==tenantId+"_"+appId)throw new ApiError(400,"License ID must be tenantId_appId");
