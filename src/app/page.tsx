@@ -6,7 +6,7 @@ import Configurations from "@/components/configurations";
 import CatalogManagement from "@/components/catalog-management";
 import Installations from "@/components/installations";
 import {LayoutDashboard,Building2,Boxes,ShieldCheck,ScrollText,LogOut,Plus,RefreshCw,LockKeyhole,ChevronRight,Settings,Puzzle,ServerCog} from "lucide-react";
-type RecordItem={id:string;name?:string;status?:string;description?:string;tenantId?:string;appId?:string;moduleId?:string;validUntil?:string;graceDays?:number;modules?:string[];action?:string;at?:string;actor?:string;target?:string;reason?:string};
+type RecordItem={id:string;pausedImmediately?:boolean;name?:string;status?:string;description?:string;tenantId?:string;appId?:string;moduleId?:string;validUntil?:string;graceDays?:number;modules?:string[];action?:string;at?:string;actor?:string;target?:string;reason?:string};
 type Data={tenants:RecordItem[];apps:RecordItem[];modules:RecordItem[];licenses:RecordItem[];logs:RecordItem[];viewerRole?:"admin"|"superadmin"};
 const empty:Data={tenants:[],apps:[],modules:[],licenses:[],logs:[]};type Tab="overview"|"tenants"|"apps"|"modules"|"licenses"|"installations"|"configurations"|"audit";
 const tabs=[{id:"overview",title:"Inicio",icon:LayoutDashboard},{id:"tenants",title:"Clientes",icon:Building2},{id:"apps",title:"Aplicaciones",icon:Boxes},{id:"modules",title:"Módulos",icon:Puzzle},{id:"licenses",title:"Licencias",icon:ShieldCheck},{id:"installations",title:"Instalaciones",icon:ServerCog},{id:"configurations",title:"Configuración",icon:Settings},{id:"audit",title:"Auditoría",icon:ScrollText}] as const;
@@ -68,7 +68,7 @@ return <div className="shell"><aside className="side"><div className="brand spac
   <div className="row" style={{flexWrap:"wrap",marginTop:15}}>
     {data.licenses.find(license=>license.id===transition)?.status==="terminated"
       ?<button type="submit" className="btn" disabled={busy||!reason.trim()}>Emitir nueva licencia y reactivar</button>
-      :(["active","grace","suspended","pause_now","terminated"] as const).map(status=><button type="button" key={status} disabled={busy||!reason.trim()} className={status==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,status)}>{status==="terminated"?"Terminar (irreversible)":status==="pause_now"?"Pausar inmediatamente":status}</button>)}
+      :(["active","grace","suspended",data.licenses.find(license=>license.id===transition)?.pausedImmediately?"resume_now":"pause_now","terminated"] as const).map(status=><button type="button" key={status} disabled={busy||!reason.trim()} className={status==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,status)}>{status==="terminated"?"Terminar (irreversible)":status==="pause_now"?"Pausar inmediatamente":status==="resume_now"?"Reactivar inmediatamente":status}</button>)}
     <button type="button" className="btn outline" onClick={()=>setTransition(null)}>Cerrar</button>
   </div>
 </form>}

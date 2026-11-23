@@ -17,12 +17,13 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
     const reason=str(body.reason,500);
     const hasTransition=body.status!==undefined;
     const pauseNow=body.status==="pause_now";
+    const resumeNow=body.status==="resume_now";
     const hasTerms=["validUntil","graceDays","modules"].some(k=>body[k]!==undefined);
     if(hasTransition===hasTerms)throw new ApiError(400,"Change status OR license terms in a separate operation");
 
     const changes:Record<string,unknown>={};
     if(hasTransition){
-      const next=(pauseNow?"suspended":str(body.status,30)) as Lifecycle;
+      const next=(pauseNow?"suspended":resumeNow?"active":str(body.status,30)) as Lifecycle;
       if(!["pending","active","grace","suspended","terminated"].includes(next))
         throw new ApiError(400,"Invalid license status");
       changes.status=next;
@@ -53,6 +54,8 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
         const from=suspensionEffective(previous.suspensionAt,now)?"suspended":previous.status as Lifecycle;
         const next=changes.status as Lifecycle;
         const cancelPending=next==="active"&&from==="active"&&typeof previous.suspensionAt==="string";
+        if(resumeNow&&previous.pausedImmediately!==true)throw new ApiError(409,"La licencia no está en pausa inmediata.");
+        changes.pausedImmediately=pauseNow;
         if(!cancelPending&&!permittedTransition(from,next))throw new ApiError(409,"Invalid status transition");
         if(pauseNow){
           changes.suspensionAt=null;
@@ -76,8 +79,8 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
       }
       tx.update(ref,{...changes,updatedAt:at});
       tx.create(db.collection("audit").doc(),{
-        actor,action:pauseNow?"LICENSE_PAUSED_IMMEDIATELY":hasTransition?"LICENSE_TRANSITION":"UPDATE_LICENSE_TERMS",target:id,
-        previousStatus:previous.status,nextStatus:pauseNow?"suspended":body.status??previous.status,effectiveAt:changes.suspensionAt??at,
+        actor,action:pauseNow?"LICENSE_PAUSED_IMMEDIATELY":resumeNow?"LICENSE_RESUMED_IMMEDIATELY":hasTransition?"LICENSE_TRANSITION":"UPDATE_LICENSE_TERMS",target:id,
+        previousStatus:previous.status,nextStatus:pauseNow?"suspended":resumeNow?"active":body.status??previous.status,effectiveAt:changes.suspensionAt??at,
         changedFields:Object.keys(changes),reason,at
       });
     });
