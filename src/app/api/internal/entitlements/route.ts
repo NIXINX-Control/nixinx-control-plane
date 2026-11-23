@@ -12,6 +12,7 @@ function reply(allowed:boolean,referenceCode:string,status=200){
 }
 export async function POST(req:NextRequest){
  const referenceCode=supportReference();
+ let stage="request";
  try{
   supplyVercelOidcForRequest(req);
   const authorized=verifyServiceToken(req.headers.get("authorization"),process.env.NIXINX_CONTROL_CORPORATE_SERVICE_TOKEN);
@@ -25,6 +26,7 @@ export async function POST(req:NextRequest){
   }
   if(req.headers.get("content-type")?.split(";")[0].trim()!=="application/json")
     throw new ApiError(415,"JSON required");
+  stage="read-control-firestore";
   const [installation,tenant,app,license,moduleRecord]=await Promise.all([
     db.collection("appInstallations").doc(b.hostname).get(),
     db.collection("tenants").doc(b.tenantId).get(),
@@ -42,6 +44,7 @@ export async function POST(req:NextRequest){
     // The scoped service credential + exact installation binding are prerequisites.
     // A denied entitlement writes a disabled/expired lease; a granted one renews a 30s lease.
     // If the Firestore mirror fails we deny the request, never grant without enforcement.
+    stage="sync-corporate-firestore";
     await syncCorporatePreviewLease({
       tenantId:b.tenantId,orgId:i.sandboxOrgId as string,hostname:b.hostname
     },decision.allowed);
@@ -60,7 +63,12 @@ export async function POST(req:NextRequest){
   }
   if(e instanceof Error && /Invalid request|Invalid service scope|Invalid module|Invalid site/.test(e.message))
     return reply(false,referenceCode,400);
-  console.error("nixinx_entitlement_error",JSON.stringify({referenceCode,error:"UNAVAILABLE"}));
+  console.error("nixinx_entitlement_error",JSON.stringify({referenceCode,error:"UNAVAILABLE",stage,
+   sandboxOrgConfigured:Boolean(process.env.NIXINX_CONTROL_CORPORATE_SANDBOX_ORG_ID),
+   sandboxProjectConfigured:Boolean(process.env.NIXINX_CONTROL_CORPORATE_SANDBOX_PROJECT_ID),
+   firestoreCode:e&&typeof e==="object"&&"code" in e&&typeof e.code==="number"?e.code:undefined,
+   targetMismatch:e instanceof Error&&e.message==="Corporate sandbox lease target not configured/verified"
+  }));
   return reply(false,referenceCode,503);
  }
 }
