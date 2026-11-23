@@ -40,7 +40,7 @@ export async function POST(req:NextRequest){
     let modules:string[]=[];
     if(kind==="licenses"){
       if(id!==tenantId+"_"+appId)throw new ApiError(400,"License ID must be tenantId_appId");
-      if(!Number.isFinite(Date.parse(str(body.validUntil,40))))throw new ApiError(400,"Invalid validity date");
+      if(body.validUntil!==null&&!Number.isFinite(Date.parse(str(body.validUntil,40))))throw new ApiError(400,"Invalid validity date");
       if(!Number.isInteger(body.graceDays)||body.graceDays<0||body.graceDays>90)throw new ApiError(400,"Grace period must be 0-90 days");
       try{modules=normalizeSelectedModules(body.modules);}catch{throw new ApiError(400,"Modules must be selected from the registered catalog without duplicates");}
       record={tenantId,appId,status:"pending",validUntil:body.validUntil,graceDays:body.graceDays,modules,createdAt:at};
