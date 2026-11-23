@@ -4,6 +4,7 @@ import type {User} from "firebase/auth";
 
 export type CatalogRow={
   id:string;name?:string;status?:string;description?:string;
+  timeZone?:string;suspensionAt?:string;servicesSuspensionAt?:string;servicesTerminatedAt?:string;
   tenantId?:string;appId?:string;moduleId?:string;validUntil?:string|null;
   graceDays?:number;modules?:string[];verified?:boolean;
 };
@@ -55,6 +56,7 @@ export default function CatalogManagement({
     setMode("edit");setEditing(row);setError("");setMessage("");setReason("");
     setDraft({
       id:tab==="modules"?(row.moduleId||""):row.id,
+      timeZone:row.timeZone||"",
       name:row.name||"",description:row.description||"",
       appId:row.appId||"",tenantId:row.tenantId||"",
       status:row.status||(tab==="modules"?"active":"active"),
@@ -125,6 +127,8 @@ export default function CatalogManagement({
           const path="/api/admin/catalog/"+tab+"/"+encodeURIComponent(editing.id);
           const body:Record<string,unknown>={name:draft.name,status:draft.status,reason};
           if(tab==="apps")body.description=draft.description||"";
+          if(tab==="tenants"&&draft.timeZone?.trim())body.timeZone=draft.timeZone;
+          if(tab==="tenants"&&draft.serviceAction)body.serviceAction=draft.serviceAction;
           await api(path,"PATCH",body);
         }
       }
@@ -185,6 +189,15 @@ export default function CatalogManagement({
           {tab==="apps"&&<label className="field full">Descripción
             <input maxLength={300} value={draft.description||""} onChange={e=>set("description",e.target.value)}/>
           </label>}
+          {tab==="tenants"&&mode==="edit"&&<>
+            <label className="field">Zona horaria del cliente<input value={draft.timeZone||""} placeholder="America/Toronto" onChange={e=>set("timeZone",e.target.value)}/></label>
+            <label className="field">Acceso para todas las aplicaciones
+              <select value={draft.serviceAction||""} onChange={e=>set("serviceAction",e.target.value)}>
+                <option value="">Conservar acceso actual</option><option value="active">Reactivar acceso</option>
+                <option value="suspended">Suspender a medianoche</option><option value="terminated">Terminar de inmediato</option>
+              </select>
+            </label>
+          </>}
           {mode==="edit"&&<label className="field">Estado (baja lógica)
             <select value={draft.status||"active"} onChange={e=>set("status",e.target.value)}>
               {tab==="modules"
@@ -237,6 +250,9 @@ export default function CatalogManagement({
           {tab==="modules"&&<div className="caption">Aplicación: {data.apps.find(a=>a.id===row.appId)?.name||row.appId} · Manifiesto: {row.verified?"Verificado":"Pendiente"}</div>}
           {row.validUntil===null&&<div className="caption">Sin vencimiento · Módulos: {(row.modules||[]).join(", ")||"Ninguno"}</div>}
           {row.validUntil&&<div className="caption">Vigente hasta: {new Date(row.validUntil).toLocaleString("es-CA")} · Gracia: {row.graceDays||0} días · Módulos: {(row.modules||[]).join(", ")||"Ninguno"}</div>}
+          {row.timeZone&&<div className="caption">Zona horaria: {row.timeZone}</div>}
+          {(row.suspensionAt||row.servicesSuspensionAt)&&<div className="caption">Suspensión efectiva: {new Date((row.suspensionAt||row.servicesSuspensionAt)!).toLocaleString("es-CA",{timeZone:row.timeZone})}</div>}
+          {row.servicesTerminatedAt&&<div className="caption">Servicios del cliente terminados</div>}
           {row.status&&<div className="caption">Estado: {row.status}</div>}
         </div>
         <div className="row" style={{flexWrap:"wrap",gap:8}}>
