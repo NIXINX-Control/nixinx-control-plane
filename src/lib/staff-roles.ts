@@ -17,3 +17,12 @@ export function resolveStaffRole(
   return null;
 }
 
+// Advanced is operational administration for both NIXINX staff roles.
+export function canManageAdvanced(role: NixinxStaffRole | null): boolean {
+  return role === "admin" || role === "superadmin";
+}
+
+// Only superadmin may approve a commercial payment exemption.
+export function canGrantPaymentExemption(role: NixinxStaffRole | null): boolean {
+  return role === "superadmin";
+}
