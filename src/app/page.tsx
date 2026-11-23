@@ -68,7 +68,7 @@ return <div className="shell"><aside className="side"><div className="brand spac
   <div className="row" style={{flexWrap:"wrap",marginTop:15}}>
     {data.licenses.find(license=>license.id===transition)?.status==="terminated"
       ?<button type="submit" className="btn" disabled={busy||!reason.trim()}>Emitir nueva licencia y reactivar</button>
-      :(["active","grace","suspended","terminated"] as const).map(status=><button type="button" key={status} disabled={busy||!reason.trim()} className={status==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,status)}>{status==="terminated"?"Terminar (irreversible)":status}</button>)}
+      :(["active","grace","suspended","pause_now","terminated"] as const).map(status=><button type="button" key={status} disabled={busy||!reason.trim()} className={status==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,status)}>{status==="terminated"?"Terminar (irreversible)":status==="pause_now"?"Pausar inmediatamente":status}</button>)}
     <button type="button" className="btn outline" onClick={()=>setTransition(null)}>Cerrar</button>
   </div>
 </form>}
