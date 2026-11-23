@@ -21,7 +21,7 @@ export function parseServiceRequest(value:unknown):ServiceEntitlementRequest{
   throw new Error("Invalid request fields");
  if(typeof o.tenantId!=="string"||!id.test(o.tenantId)||
    o.appId!=="corporate"||typeof o.hostname!=="string"||
-   !dns.test(o.hostname)||!(o.hostname==="corporate.nixinx.app"||o.hostname.endsWith(".corporate.nixinx.app"))||
+   !dns.test(o.hostname)||!o.hostname.endsWith(".corporate.nixinx.app")||
    (o.environment!=="preview"&&o.environment!=="production"))
    throw new Error("Invalid service scope");
  if(o.moduleId!==undefined && (typeof o.moduleId!=="string"||!id.test(o.moduleId)))
