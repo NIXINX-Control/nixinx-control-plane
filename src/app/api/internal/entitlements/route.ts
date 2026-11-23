@@ -1,3 +1,4 @@
+import {handleProductionEntitlement} from "@/lib/corporate-production-entitlement";
 import {NextRequest} from "next/server";
 import {db,fail,ApiError} from "@/lib/server";
 import {accessDecision,suspensionEffective,tenantTimeZone,License} from "@/lib/lifecycle";
@@ -11,6 +12,7 @@ function reply(allowed:boolean,referenceCode:string,status=200){
  return Response.json({allowed,referenceCode},{status,headers:{"Cache-Control":"no-store"}});
 }
 export async function POST(req:NextRequest){
+ if(process.env.VERCEL_ENV==="production")return handleProductionEntitlement(req);
  const referenceCode=supportReference();
  if(process.env.VERCEL_ENV!=="preview")return reply(false,referenceCode,503);
  let stage="request";
