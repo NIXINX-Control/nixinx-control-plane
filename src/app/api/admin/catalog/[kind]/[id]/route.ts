@@ -1,5 +1,6 @@
 import {NextRequest} from "next/server";
 import {adminUser,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
+import {localDayBoundary,tenantTimeZone} from "@/lib/lifecycle";
 import {acceptsCatalogStatus} from "@/lib/catalog";
 
 export const runtime="nodejs";
@@ -19,7 +20,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
     const ref=db.collection(kind==="modules"?"appModules":kind).doc(docId);
     const body=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
     if(!body||typeof body!=="object"||Array.isArray(body))throw new ApiError(400,"Invalid edit request");
-    const allowed=["name","description","status","reason"];
+    const allowed=["name","description","status","reason","timeZone","serviceAction"];
     if(Object.keys(body).some(key=>!allowed.includes(key)))
       throw new ApiError(400,"IDs and application bindings are immutable");
     const reason=str(body.reason,500);
@@ -34,7 +35,15 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
       if(!acceptsCatalogStatus(kind,body.status))throw new ApiError(400,"Invalid catalog status");
       changes.status=body.status;
     }
-    if(Object.keys(changes).length===0)throw new ApiError(400,"No changes submitted");
+    if(body.timeZone!==undefined){
+      const zone=tenantTimeZone(body.timeZone);
+      if(kind!=="tenants"||!zone)throw new ApiError(400,"Invalid client time zone");
+      changes.timeZone=zone;
+    }
+    const serviceAction=body.serviceAction;
+    if(serviceAction!==undefined&&(kind!=="tenants"||!["active","suspended","terminated"].includes(serviceAction)))
+      throw new ApiError(400,"Invalid client service action");
+    if(Object.keys(changes).length===0&&serviceAction===undefined)throw new ApiError(400,"No changes submitted");
 
     const at=new Date().toISOString();
     await db.runTransaction(async tx=>{
@@ -63,11 +72,23 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
           if(!configs.empty)throw new ApiError(409,"Catalog record has configuration bindings");
         }
       }
+      if(serviceAction!==undefined){
+        if(previous.servicesTerminatedAt)throw new ApiError(409,"Client services are terminated");
+        if(serviceAction==="suspended"){
+          const zone=tenantTimeZone(changes.timeZone??previous.timeZone);
+          if(!zone)throw new ApiError(409,"Configure the client time zone before scheduling a suspension");
+          changes.servicesSuspensionAt=previous.servicesSuspensionAt??localDayBoundary(new Date(at),zone,1).toISOString();
+        }else{
+          changes.servicesSuspensionAt=null;
+          if(serviceAction==="terminated")changes.servicesTerminatedAt=at;
+        }
+      }
       tx.update(ref,{...changes,updatedAt:at});
       tx.create(db.collection("audit").doc(),{
         actor,action:"UPDATE_"+kind.toUpperCase(),target:docId,
         changedFields:Object.keys(changes),previousStatus:previous.status??null,
-        nextStatus:changes.status??previous.status??null,reason,at
+        nextStatus:changes.status??previous.status??null,serviceAction:serviceAction??null,
+        effectiveAt:changes.servicesSuspensionAt??at,reason,at
       });
     });
     return ok({id:docId,updated:true});
