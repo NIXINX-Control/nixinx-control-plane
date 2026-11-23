@@ -24,6 +24,7 @@ export async function handleProductionEntitlement(req:NextRequest){
    request.tenantId!==process.env.NIXINX_CONTROL_CORPORATE_PRODUCTION_TENANT_ID||
    request.hostname!==process.env.NIXINX_CONTROL_CORPORATE_PRODUCTION_HOSTNAME)
   return reply(false,403);
+ let stage="control_firestore_read";
  try{
   const [installation,tenant,app,license]=await db.getAll(
    db.collection("appInstallations").doc(request.hostname),
@@ -44,18 +45,23 @@ export async function handleProductionEntitlement(req:NextRequest){
    !tenant.data()?.servicesTerminatedAt&&!suspensionEffective(tenant.data()?.servicesSuspensionAt,now)&&
    record?.appId===request.appId&&record?.tenantId===request.tenantId&&
    ["active","trial","grace"].includes(record.status)&&accessDecision(record as License,now,undefined,tenantTimeZone(tenant.data()?.timeZone)).allowed;
+  stage="customer_credential";
   const credential=adminApp.options.credential;
   if(!credential)return reply(false,503);
+  stage="customer_firebase_init";
   const name="corporate-production-"+projectId;
   const customerApp=getApps().find(app=>app.name===name)??initializeApp({credential,projectId},name);
+  stage="customer_firestore_write";
   await getFirestore(customerApp).doc("organizations/"+orgId+"/nixinxControl/access").set({
    active:allowed,appId:request.appId,environment:"production",
    expiresAt:Timestamp.fromMillis(allowed?Math.min(now.getTime()+30_000,cutoff):now.getTime()),
    updatedAt:FieldValue.serverTimestamp()
   });
   return reply(allowed);
- }catch{
-  console.error("corporate_production_entitlement_unavailable",{referenceCode});
+ }catch(error){
+  const rawCode=typeof error==="object"&&error!==null&&"code" in error?error.code:undefined;
+  const code=typeof rawCode==="string"&&/^[a-zA-Z0-9_./-]{1,80}$/.test(rawCode)?rawCode:"unknown";
+  console.error("corporate_production_entitlement_unavailable",{referenceCode,stage,code});
   return reply(false,503);
  }
 }
