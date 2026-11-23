@@ -11,7 +11,8 @@ import {leaseConfigurationValid,leasePayload,type SandboxLeaseBinding} from "@/l
  */
 export async function syncCorporatePreviewLease(
  binding:SandboxLeaseBinding,
- allowed:boolean
+ allowed:boolean,
+ cutoff?:number
 ):Promise<void>{
  const projectId=process.env.NIXINX_CONTROL_CORPORATE_SANDBOX_PROJECT_ID;
  const orgId=process.env.NIXINX_CONTROL_CORPORATE_SANDBOX_ORG_ID;
@@ -23,7 +24,7 @@ export async function syncCorporatePreviewLease(
  const app=getApps().find(x=>x.name===name)??initializeApp({
   credential:sourceCredential,projectId
  },name);
- const payload=leasePayload(binding,allowed,new Date());
+ const payload=leasePayload(binding,allowed,new Date(),cutoff);
  await getFirestore(app).doc("organizations/"+binding.orgId+"/nixinxControl/access").set({
   ...payload,
   expiresAt:Timestamp.fromDate(payload.expiresAt),
