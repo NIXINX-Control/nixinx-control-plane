@@ -2,10 +2,11 @@
 import {useEffect,useState} from "react";
 import type {User} from "firebase/auth";
 type Tenant={id:string;name?:string;status?:string};
-type Installation={hostname:string;tenantId:string;appId:string;environment:string;verified?:boolean;status:string;firebaseProjectId?:string;sandboxOrgId?:string};
+type Installation={hostname:string;tenantId:string;appId:string;environment:string;verified?:boolean;status:string;firebaseProjectId?:string;sandboxOrgId?:string;orgId?:string};
 
 export default function Installations({user,tenants}:{user:User;tenants:Tenant[]}){
  const [items,setItems]=useState<Installation[]>([]);
+ const [production,setProduction]=useState(false);
  const [tenantId,setTenantId]=useState("");
  const [hostname,setHostname]=useState("nelcy-preview.corporate.nixinx.app");
  const [busy,setBusy]=useState(false);
@@ -24,7 +25,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
   return data;
  }
  async function refresh(){
-  try{const r=await request("GET");setItems(r.installations||[])}
+  try{const r=await request("GET");setItems(r.installations||[]);setProduction(r.environment==="production");if(r.environment==="production")setHostname(r.hostname||"")}
   catch(e){setError(e instanceof Error?e.message:"No se pudieron consultar las instalaciones")}
  }
  useEffect(()=>{void refresh();},[user]);
@@ -33,7 +34,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
   setBusy(true);setError("");setNotice("");
   try{
    await request("POST",{tenantId,hostname:hostname.trim().toLowerCase()});
-   setNotice("Instalación verificada contra el Corporate Preview y registrada en auditoría.");
+   setNotice("Instalación registrada en auditoría.");
    await refresh();
   }catch(e){setError(e instanceof Error?e.message:"Falló la verificación")}finally{setBusy(false)}
  }
@@ -48,7 +49,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
  }
  return <section className="panel">
   <h3 className="subheading">Instalaciones de Corporate</h3>
-  <p className="caption">Una instalación solo se activa cuando Control verifica su hostname, entorno Preview, Firebase sandbox y organización. El estado de la licencia se gestiona por separado.</p>
+  <p className="caption">{production?"El superadministrador registra el dominio y cliente configurados para producción. La licencia se gestiona por separado.":"Control verifica el dominio y la configuración Firebase del piloto Preview."}</p>
   {error&&<p className="error" role="alert">{error}</p>}
   {notice&&<p className="notice" role="status">{notice}</p>}
   <div className="fields">
@@ -59,9 +60,9 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
     </select>
    </label>
    <label className="field">Hostname exacto
-    <input value={hostname} onChange={e=>setHostname(e.target.value)} disabled={busy}/>
+    <input value={hostname} onChange={e=>setHostname(e.target.value)} disabled={busy||production}/>
    </label>
-   <div className="row full"><button className="btn" disabled={busy||!tenantId} onClick={()=>void verify()}>{busy?"Verificando…":"Verificar e instalar"}</button>
+   <div className="row full"><button className="btn" disabled={busy||!tenantId} onClick={()=>void verify()}>{busy?"Verificando…":production?"Registrar instalación":"Verificar e instalar"}</button>
     <button className="btn secondary" disabled={busy} onClick={()=>void refresh()}>Actualizar</button>
    </div>
   </div>
@@ -71,7 +72,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
      <b>{i.hostname}</b>
      <div className="caption">Cliente: {i.tenantId} · Aplicación: {i.appId} · {i.environment}</div>
      <div className="caption">Estado: {i.status} · Verificación: {i.verified?"Confirmada":"Pendiente"}</div>
-     {i.firebaseProjectId&&<div className="caption">Firebase: {i.firebaseProjectId} · Organización: {i.sandboxOrgId}</div>}
+     {i.firebaseProjectId&&<div className="caption">Firebase: {i.firebaseProjectId} · Organización: {i.orgId||i.sandboxOrgId}</div>}
     </div>
     <button className="btn outline tiny" disabled={busy||i.status==="disabled"} onClick={()=>{setDisable(i.hostname);setReason("");setError("");}}>Deshabilitar</button>
    </div>)}
