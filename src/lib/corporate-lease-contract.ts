@@ -14,13 +14,13 @@ export function leaseConfigurationValid(
   binding.hostname.endsWith(".corporate.nixinx.app")
  );
 }
-export function leasePayload(binding:SandboxLeaseBinding,allowed:boolean,now:Date){
+export function leasePayload(binding:SandboxLeaseBinding,allowed:boolean,now:Date,cutoff=Infinity){
  return {
   tenantId:binding.tenantId,
   appId:"corporate" as const,
   environment:"preview" as const,
   hostname:binding.hostname,
   active:allowed,
-  expiresAt:new Date(now.getTime()+(allowed?EXPIRY_MILLISECONDS:0)),
+  expiresAt:new Date(allowed?Math.min(now.getTime()+EXPIRY_MILLISECONDS,cutoff):now.getTime()),
  };
 }
