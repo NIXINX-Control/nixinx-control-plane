@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {db,fail,ApiError} from "@/lib/server";
-import {accessDecision,License} from "@/lib/lifecycle";
+import {accessDecision,suspensionEffective,tenantTimeZone,License} from "@/lib/lifecycle";
 import {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference} from "@/lib/service-entitlement";
 import {syncCorporatePreviewLease} from "@/lib/corporate-preview-lease";
 import {supplyVercelOidcForRequest} from "@/lib/keyless-google-credential";
@@ -36,7 +36,12 @@ export async function POST(req:NextRequest){
   ]);
   const i=installation.data();
   const valid=installationAuthorized(b,i,tenant.data(),app.data()) && moduleIsVerified(b,moduleRecord?.data());
-  const decision=valid?accessDecision(license.exists?license.data() as License:null,new Date(),b.moduleId):{allowed:false,reason:"INSTALLATION_NOT_AUTHORIZED"};
+  const now=new Date();
+  const tenantRecord=tenant.data();
+  const clientDisabled=Boolean(tenantRecord?.servicesTerminatedAt)||suspensionEffective(tenantRecord?.servicesSuspensionAt,now);
+  const decision=valid&&!clientDisabled
+    ?accessDecision(license.exists?license.data() as License:null,now,b.moduleId,tenantTimeZone(tenantRecord?.timeZone))
+    :{allowed:false,reason:clientDisabled?"CLIENT_SERVICES_DISABLED":"INSTALLATION_NOT_AUTHORIZED"};
   const bindingKnown=i?.tenantId===b.tenantId && i?.appId==="corporate" &&
     i?.hostname===b.hostname && i?.environment==="preview" &&
     typeof i?.sandboxOrgId==="string";
