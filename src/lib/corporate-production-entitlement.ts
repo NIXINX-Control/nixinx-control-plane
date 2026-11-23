@@ -5,7 +5,7 @@ import {adminApp,db} from "@/lib/server";
 import {accessDecision,suspensionEffective,tenantTimeZone,type License} from "@/lib/lifecycle";
 import {installationAuthorized,parseServiceRequest,supportReference,verifyServiceToken} from "@/lib/service-entitlement";
 
-export async function handleProductionEntitlement(req:NextRequest){
+export async function handleProductionEntitlement(req:NextRequest, mode:"mirror"|"decision"="mirror"){
  const referenceCode=supportReference();
  const reply=(allowed:boolean,status=200)=>Response.json({allowed,referenceCode},{
   status,headers:{"Cache-Control":"no-store"}
@@ -44,13 +44,19 @@ export async function handleProductionEntitlement(req:NextRequest){
    !tenant.data()?.servicesTerminatedAt&&!suspensionEffective(tenant.data()?.servicesSuspensionAt,now)&&
    record?.appId===request.appId&&record?.tenantId===request.tenantId&&
    ["active","trial","grace"].includes(record.status)&&accessDecision(record as License,now,undefined,tenantTimeZone(tenant.data()?.timeZone)).allowed;
+  const expiresAt=allowed?Math.min(now.getTime()+30_000,cutoff):now.getTime();
+  if(mode==="decision")return Response.json({
+   allowed,referenceCode,hostname:request.hostname,tenantId:request.tenantId,
+   appId:request.appId,environment:"production",firebaseProjectId:projectId,orgId,
+   expiresAt:new Date(expiresAt).toISOString()
+  },{headers:{"Cache-Control":"no-store"}});
   const credential=adminApp.options.credential;
   if(!credential)return reply(false,503);
   const name="corporate-production-"+projectId;
   const customerApp=getApps().find(app=>app.name===name)??initializeApp({credential,projectId},name);
   await getFirestore(customerApp).doc("organizations/"+orgId+"/nixinxControl/access").set({
    active:allowed,appId:request.appId,environment:"production",
-   expiresAt:Timestamp.fromMillis(allowed?Math.min(now.getTime()+30_000,cutoff):now.getTime()),
+   expiresAt:Timestamp.fromMillis(expiresAt),
    updatedAt:FieldValue.serverTimestamp()
   });
   return reply(allowed);
