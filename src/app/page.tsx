@@ -15,7 +15,7 @@ useEffect(()=>onAuthStateChanged(auth,u=>{authEpoch.current+=1;setUser(u);setChe
 async function request(path:string,method="GET",body?:unknown){if(!user)throw new Error("Inicia sesión");const token=await user.getIdToken();const response=await fetch(path,{method,headers:{"authorization":"Bearer "+token,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,cache:"no-store"});const payload=await response.json();if(!response.ok){const error=new Error(payload.error||"Request failed") as Error&{status?:number};error.status=response.status;throw error;}return payload}
 async function load(){if(!user)return;const epoch=authEpoch.current;setBusy(true);try{const result=await request("/api/admin");if(epoch!==authEpoch.current)return;setData(result);setAccess("allowed");setError("")}catch(e){if(epoch!==authEpoch.current)return;const status=(e as Error&{status?:number}).status;setAccess(status===401||status===403?"denied":"error");setData(empty);setError((e as Error).message)}finally{if(epoch===authEpoch.current)setBusy(false)}}
 useEffect(()=>{if(user)void load()},[user]);
-async function updateLicense(id:string,status:string){if(!reason.trim()){setError("Escribe un motivo para auditar este cambio");return}setBusy(true);try{await request("/api/admin/licenses/"+encodeURIComponent(id),"PATCH",{status,reason});setTransition(null);setReason("");await load()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+async function updateLicense(id:string,status:string,validUntil?:string){if(!reason.trim()){setError("Escribe un motivo para auditar este cambio");return}setBusy(true);setError("");try{const replacement=status==="reissue";await request("/api/admin/licenses/"+encodeURIComponent(id),replacement?"POST":"PATCH",replacement?{reason,validUntil}:{status,reason});setTransition(null);setReason("");await load()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
 
 if(!checked)return <main className="login"><p className="brand">NIXINX<span> Control</span></p><p className="muted">Comprobando sesión…</p></main>;
 if(!user)return <main className="login panel">
@@ -51,6 +51,26 @@ return <div className="shell"><aside className="side"><div className="brand spac
 {tab==="installations"&&<Installations user={user} tenants={data.tenants}/>}
 {tab==="configurations"&&(data.viewerRole==="admin"||data.viewerRole==="superadmin")&&<Configurations user={user} tenants={data.tenants} apps={data.apps}/>}
 {tab==="audit"&&<section className="panel"><h3 className="subheading">Eventos auditados</h3>{data.logs.length?data.logs.map((a,i)=><div className="item" key={a.id||i}><div><b>{a.action}</b><div className="caption">{a.target} · {a.actor}</div><div className="caption">{a.at}</div></div></div>):<div className="empty">Todavía no hay eventos.</div>}</section>}
-{transition&&<div className="panel" role="dialog" aria-label="Cambiar estado de licencia"><h3 className="subheading">Autorizar cambio de licencia</h3><p className="caption">Licencia: {transition}. Esta acción quedará registrada en auditoría.</p><label className="field">Motivo obligatorio<textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3}/></label><div className="row" style={{flexWrap:"wrap",marginTop:15}}>{(["active","grace","suspended","terminated"] as const).map(s=><button key={s} disabled={busy||!reason.trim()} className={s==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,s)}>{s}</button>)}<button className="btn outline" onClick={()=>setTransition(null)}>Cerrar</button></div></div>}
+{transition&&<form key={transition} className="panel" aria-label="Cambiar estado de licencia" onSubmit={event=>{
+  event.preventDefault();
+  const expiry=new FormData(event.currentTarget).get("replacementExpiry");
+  void updateLicense(transition,"reissue",typeof expiry==="string"&&expiry?new Date(expiry).toISOString():undefined);
+}}>
+  <h3 className="subheading">Autorizar cambio de licencia</h3>
+  <p className="caption">Licencia: {transition}. Esta acción quedará registrada en auditoría.</p>
+  <label className="field">Motivo obligatorio<textarea required maxLength={500} value={reason} onChange={e=>setReason(e.target.value)} rows={3}/></label>
+  {data.licenses.find(license=>license.id===transition)?.status==="terminated"&&<>
+    <p className="caption">La licencia terminada se conserva en el historial. La nueva licencia se emite para el mismo cliente y aplicación.</p>
+    <label className="field">Nuevo vencimiento (opcional si la vigencia anterior sigue válida o era indefinida)
+      <input name="replacementExpiry" type="datetime-local"/>
+    </label>
+  </>}
+  <div className="row" style={{flexWrap:"wrap",marginTop:15}}>
+    {data.licenses.find(license=>license.id===transition)?.status==="terminated"
+      ?<button type="submit" className="btn" disabled={busy||!reason.trim()}>Emitir nueva licencia y reactivar</button>
+      :(["active","grace","suspended","terminated"] as const).map(status=><button type="button" key={status} disabled={busy||!reason.trim()} className={status==="terminated"?"btn outline":"btn secondary"} onClick={()=>void updateLicense(transition,status)}>{status==="terminated"?"Terminar (irreversible)":status}</button>)}
+    <button type="button" className="btn outline" onClick={()=>setTransition(null)}>Cerrar</button>
+  </div>
+</form>}
 <p className="caption" style={{marginTop:28}}>NIXINX Control • Preview de desarrollo • Administración por UID • Sin cobros ni pagos conectados</p></main><nav className="nav" aria-label="Navegación">{navigation}</nav></div>
 }
