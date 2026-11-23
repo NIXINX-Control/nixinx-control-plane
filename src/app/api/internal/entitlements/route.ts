@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {db,fail,ApiError} from "@/lib/server";
-import {accessDecision,License} from "@/lib/lifecycle";
+import {accessDecision,suspensionEffective,tenantTimeZone,License} from "@/lib/lifecycle";
 import {verifyServiceToken,parseServiceRequest,installationAuthorized,moduleIsVerified,supportReference} from "@/lib/service-entitlement";
 import {syncCorporatePreviewLease} from "@/lib/corporate-preview-lease";
 import {supplyVercelOidcForRequest} from "@/lib/keyless-google-credential";
@@ -36,7 +36,16 @@ export async function POST(req:NextRequest){
   ]);
   const i=installation.data();
   const valid=installationAuthorized(b,i,tenant.data(),app.data()) && moduleIsVerified(b,moduleRecord?.data());
-  const decision=valid?accessDecision(license.exists?license.data() as License:null,new Date(),b.moduleId):{allowed:false,reason:"INSTALLATION_NOT_AUTHORIZED"};
+  const now=new Date();
+  const tenantRecord=tenant.data();
+  const clientDisabled=Boolean(tenantRecord?.servicesTerminatedAt)||suspensionEffective(tenantRecord?.servicesSuspensionAt,now);
+  const licenseRecord=license.exists?license.data() as License:null;
+  const cutoff=Math.min(...[tenantRecord?.servicesSuspensionAt,licenseRecord?.suspensionAt]
+    .filter((value):value is string=>typeof value==="string")
+    .map(value=>Date.parse(value)).filter(Number.isFinite));
+  const decision=valid&&!clientDisabled
+    ?accessDecision(licenseRecord,now,b.moduleId,tenantTimeZone(tenantRecord?.timeZone))
+    :{allowed:false,reason:clientDisabled?"CLIENT_SERVICES_DISABLED":"INSTALLATION_NOT_AUTHORIZED"};
   const bindingKnown=i?.tenantId===b.tenantId && i?.appId==="corporate" &&
     i?.hostname===b.hostname && i?.environment==="preview" &&
     typeof i?.sandboxOrgId==="string";
@@ -47,7 +56,7 @@ export async function POST(req:NextRequest){
     stage="sync-corporate-firestore";
     await syncCorporatePreviewLease({
       tenantId:b.tenantId,orgId:i.sandboxOrgId as string,hostname:b.hostname
-    },decision.allowed);
+    },decision.allowed,cutoff);
   }else if(decision.allowed){
     throw new Error("Verified sandbox organization binding missing");
   }

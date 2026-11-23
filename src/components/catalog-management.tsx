@@ -4,7 +4,8 @@ import type {User} from "firebase/auth";
 
 export type CatalogRow={
   id:string;name?:string;status?:string;description?:string;
-  tenantId?:string;appId?:string;moduleId?:string;validUntil?:string;
+  timeZone?:string;suspensionAt?:string;servicesSuspensionAt?:string;servicesTerminatedAt?:string;
+  tenantId?:string;appId?:string;moduleId?:string;validUntil?:string|null;
   graceDays?:number;modules?:string[];verified?:boolean;
 };
 export type CatalogData={
@@ -12,7 +13,7 @@ export type CatalogData={
 };
 export type CatalogTab="tenants"|"apps"|"modules"|"licenses";
 
-function toLocalInput(iso:string|undefined){
+function toLocalInput(iso:string|null|undefined){
   if(!iso)return "";
   const date=new Date(iso);
   return Number.isFinite(date.getTime())
@@ -55,10 +56,12 @@ export default function CatalogManagement({
     setMode("edit");setEditing(row);setError("");setMessage("");setReason("");
     setDraft({
       id:tab==="modules"?(row.moduleId||""):row.id,
+      timeZone:row.timeZone||"",
       name:row.name||"",description:row.description||"",
       appId:row.appId||"",tenantId:row.tenantId||"",
       status:row.status||(tab==="modules"?"active":"active"),
       validUntil:toLocalInput(row.validUntil),
+      indefinite:row.validUntil===null?"yes":"no",
       graceDays:String(row.graceDays||0)
     });
     setSelectedModules(row.modules||[]);
@@ -92,7 +95,7 @@ export default function CatalogManagement({
     if(mode==="new"&&!checkNewId())return;
     if(mode==="edit"&&!reason.trim()){setError("Explica el motivo del cambio para auditoría.");return;}
     if(tab==="licenses"){
-      if(!draft.tenantId||!draft.appId||!draft.validUntil){setError("Cliente, aplicación y vigencia son obligatorios.");return;}
+      if(!draft.tenantId||!draft.appId||(draft.indefinite!=="yes"&&!draft.validUntil)){setError("Cliente, aplicación y vigencia son obligatorios.");return;}
       const grace=Number(draft.graceDays||0);
       if(!Number.isInteger(grace)||grace<0||grace>90){setError("Los días de gracia deben estar entre 0 y 90.");return;}
       if(selectedModules.some(mid=>!appModules.some(m=>m.moduleId===mid))){
@@ -106,7 +109,7 @@ export default function CatalogManagement({
         const body:Record<string,unknown>={kind:tab};
         if(tab==="licenses"){
           body.id=licenseId;body.tenantId=draft.tenantId;body.appId=draft.appId;
-          body.validUntil=new Date(draft.validUntil).toISOString();
+          body.validUntil=draft.indefinite==="yes"?null:new Date(draft.validUntil).toISOString();
           body.graceDays=Number(draft.graceDays||0);body.modules=selectedModules;
         }else{
           body.id=draft.id;body.name=draft.name;
@@ -117,13 +120,15 @@ export default function CatalogManagement({
       }else if(editing){
         if(tab==="licenses"){
           await api("/api/admin/licenses/"+encodeURIComponent(editing.id),"PATCH",{
-            validUntil:new Date(draft.validUntil).toISOString(),
+            validUntil:draft.indefinite==="yes"?null:new Date(draft.validUntil).toISOString(),
             graceDays:Number(draft.graceDays||0),modules:selectedModules,reason
           });
         }else{
           const path="/api/admin/catalog/"+tab+"/"+encodeURIComponent(editing.id);
           const body:Record<string,unknown>={name:draft.name,status:draft.status,reason};
           if(tab==="apps")body.description=draft.description||"";
+          if(tab==="tenants"&&draft.timeZone?.trim())body.timeZone=draft.timeZone;
+          if(tab==="tenants"&&draft.serviceAction)body.serviceAction=draft.serviceAction;
           await api(path,"PATCH",body);
         }
       }
@@ -184,6 +189,15 @@ export default function CatalogManagement({
           {tab==="apps"&&<label className="field full">Descripción
             <input maxLength={300} value={draft.description||""} onChange={e=>set("description",e.target.value)}/>
           </label>}
+          {tab==="tenants"&&mode==="edit"&&<>
+            <label className="field">Zona horaria del cliente<input value={draft.timeZone||""} placeholder="America/Toronto" onChange={e=>set("timeZone",e.target.value)}/></label>
+            <label className="field">Acceso para todas las aplicaciones
+              <select value={draft.serviceAction||""} onChange={e=>set("serviceAction",e.target.value)}>
+                <option value="">Conservar acceso actual</option><option value="active">Reactivar acceso</option>
+                <option value="suspended">Suspender a medianoche</option><option value="terminated">Terminar de inmediato</option>
+              </select>
+            </label>
+          </>}
           {mode==="edit"&&<label className="field">Estado (baja lógica)
             <select value={draft.status||"active"} onChange={e=>set("status",e.target.value)}>
               {tab==="modules"
@@ -194,7 +208,8 @@ export default function CatalogManagement({
         </>}
         {tab==="licenses"&&<>
           <label className="field">Fin de vigencia
-            <input required type="datetime-local" value={draft.validUntil||""} onChange={e=>set("validUntil",e.target.value)}/>
+            <select aria-label="Tipo de vigencia" value={draft.indefinite||"no"} onChange={e=>set("indefinite",e.target.value)}><option value="no">Hasta una fecha</option><option value="yes">Sin vencimiento</option></select>
+            {draft.indefinite!=="yes"&&<input required type="datetime-local" value={draft.validUntil||""} onChange={e=>set("validUntil",e.target.value)}/>}
           </label>
           <label className="field">Días de gracia (0–90)
             <input required type="number" min={0} max={90} value={draft.graceDays??"0"} onChange={e=>set("graceDays",e.target.value)}/>
@@ -233,7 +248,11 @@ export default function CatalogManagement({
             {row.appId?" · Aplicación: "+row.appId:""}
             {row.tenantId?" · Cliente: "+row.tenantId:""}</div>
           {tab==="modules"&&<div className="caption">Aplicación: {data.apps.find(a=>a.id===row.appId)?.name||row.appId} · Manifiesto: {row.verified?"Verificado":"Pendiente"}</div>}
+          {row.validUntil===null&&<div className="caption">Sin vencimiento · Módulos: {(row.modules||[]).join(", ")||"Ninguno"}</div>}
           {row.validUntil&&<div className="caption">Vigente hasta: {new Date(row.validUntil).toLocaleString("es-CA")} · Gracia: {row.graceDays||0} días · Módulos: {(row.modules||[]).join(", ")||"Ninguno"}</div>}
+          {row.timeZone&&<div className="caption">Zona horaria: {row.timeZone}</div>}
+          {(row.suspensionAt||row.servicesSuspensionAt)&&<div className="caption">Suspensión efectiva: {new Date((row.suspensionAt||row.servicesSuspensionAt)!).toLocaleString("es-CA",{timeZone:row.timeZone})}</div>}
+          {row.servicesTerminatedAt&&<div className="caption">Servicios del cliente terminados</div>}
           {row.status&&<div className="caption">Estado: {row.status}</div>}
         </div>
         <div className="row" style={{flexWrap:"wrap",gap:8}}>
