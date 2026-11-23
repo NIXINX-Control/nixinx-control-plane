@@ -27,8 +27,8 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
       changes.status=next;
     }
     if(body.validUntil!==undefined){
-      const value=str(body.validUntil,40);
-      if(!Number.isFinite(Date.parse(value)))throw new ApiError(400,"Invalid date");
+      const value=body.validUntil===null?null:str(body.validUntil,40);
+      if(value!==null&&!Number.isFinite(Date.parse(value)))throw new ApiError(400,"Invalid date");
       changes.validUntil=value;
     }
     if(body.graceDays!==undefined){
