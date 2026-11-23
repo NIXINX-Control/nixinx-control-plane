@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {adminUser,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
-import {permittedTransition,Lifecycle} from "@/lib/lifecycle";
+import {permittedTransition,localDayBoundary,suspensionEffective,tenantTimeZone,Lifecycle} from "@/lib/lifecycle";
 import {appModuleDocId,normalizeSelectedModules,validateSelectedModules} from "@/lib/catalog";
 
 export const runtime="nodejs";
@@ -48,8 +48,20 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
       const previous=snap.data()!;
       if(id!==previous.tenantId+"_"+previous.appId)throw new ApiError(409,"License assignment inconsistent");
       if(hasTransition){
-        if(!permittedTransition(previous.status as Lifecycle,changes.status as Lifecycle))
-          throw new ApiError(409,"Invalid status transition");
+        const now=new Date(at);
+        const from=suspensionEffective(previous.suspensionAt,now)?"suspended":previous.status as Lifecycle;
+        const next=changes.status as Lifecycle;
+        const cancelPending=next==="active"&&from==="active"&&typeof previous.suspensionAt==="string";
+        if(!cancelPending&&!permittedTransition(from,next))throw new ApiError(409,"Invalid status transition");
+        if(next==="suspended"){
+          const tenant=await tx.get(db.collection("tenants").doc(previous.tenantId));
+          const zone=tenantTimeZone(tenant.data()?.timeZone);
+          if(!zone)throw new ApiError(409,"Configure the client time zone before scheduling a suspension");
+          changes.status=previous.status;
+          changes.suspensionAt=previous.suspensionAt??localDayBoundary(now,zone,1).toISOString();
+        }else if(next==="active"||next==="terminated"){
+          changes.suspensionAt=null;
+        }
       }else{
         if(previous.status==="terminated")throw new ApiError(409,"Terminated license cannot be modified");
         if(changes.modules!==undefined){
@@ -62,7 +74,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
       tx.update(ref,{...changes,updatedAt:at});
       tx.create(db.collection("audit").doc(),{
         actor,action:hasTransition?"LICENSE_TRANSITION":"UPDATE_LICENSE_TERMS",target:id,
-        previousStatus:previous.status,nextStatus:changes.status??previous.status,
+        previousStatus:previous.status,nextStatus:body.status??previous.status,effectiveAt:changes.suspensionAt??at,
         changedFields:Object.keys(changes),reason,at
       });
     });
