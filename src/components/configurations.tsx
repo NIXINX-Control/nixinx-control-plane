@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import type {User} from "firebase/auth";
 import {assignedHostname} from "@/lib/tenant-configuration";
 import type {FirebaseWebConfig,TenantConfiguration} from "@/lib/tenant-configuration";
@@ -16,6 +16,7 @@ const fields: {key:keyof FirebaseWebConfig;label:string}[]=[
 const blank:FirebaseWebConfig={apiKey:"",authDomain:"",projectId:"",storageBucket:"",messagingSenderId:"",appId:""};
 export default function Configurations({user,tenants,apps}:{user:User;tenants:Item[];apps:Item[]}){
   const [rows,setRows]=useState<Row[]>([]),[tenantId,setTenant]=useState(""),[appId,setApp]=useState(""),[firebase,setFirebase]=useState(blank),[orgId,setOrg]=useState(""),[editing,setEditing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState(""),[truncated,setTruncated]=useState(false);
+  const editorRef=useRef<HTMLElement>(null);
   let hostname="";try{hostname=assignedHostname(tenantId,appId)}catch{}
   async function request(body?:TenantConfiguration){
     const token=await user.getIdToken();
@@ -33,7 +34,7 @@ export default function Configurations({user,tenants,apps}:{user:User;tenants:It
   return <>
     <p className="notice">Registra la configuración web de cada cliente y aplicación. No introduzcas claves privadas, contraseñas ni credenciales de servicio. Esta etapa no activa conexiones productivas.</p>
     {error&&<p role="alert" className="error">{error}</p>}{message&&<p role="status" className="notice">{message}</p>}
-    <section className="panel"><h3 className="subheading">{editing?"Editar borrador":"Nueva configuración"}</h3>
+    <section className="panel" ref={editorRef}><h3 className="subheading">{editing?"Editar borrador":"Nueva configuración"}</h3>
       <form className="fields" onSubmit={e=>{e.preventDefault();void save()}}>
        <label className="field">Cliente<select required disabled={editing||busy} value={tenantId} onChange={e=>setTenant(e.target.value)}><option value="">Selecciona</option>{tenants.map(t=><option key={t.id} value={t.id}>{t.name||t.id}</option>)}</select></label>
        <label className="field">Aplicación<select required disabled={editing||busy} value={appId} onChange={e=>setApp(e.target.value)}><option value="">Selecciona</option>{apps.map(a=><option key={a.id} value={a.id}>{a.name||a.id}</option>)}</select></label>
@@ -45,7 +46,7 @@ export default function Configurations({user,tenants,apps}:{user:User;tenants:It
     </section>
     <section className="panel"><div className="row"><h3 className="subheading">Configuraciones registradas</h3><button className="btn outline" disabled={busy} onClick={()=>void load()}>Actualizar</button></div>
     {truncated&&<p className="caption">Se muestran las primeras 200 configuraciones. Paginación pendiente.</p>}
-    {rows.length?rows.map(row=><div className="item" key={row.id}><div style={{minWidth:0,overflowWrap:"anywhere"}}><b>{row.hostname}</b><div className="caption">{row.tenantId} · {row.appId}</div><div className="caption">Firebase: {row.firebase.projectId} · {row.status}</div></div><button className="btn outline" disabled={busy||row.status!=="draft"} onClick={()=>{setTenant(row.tenantId);setApp(row.appId);setFirebase(row.firebase);setOrg(row.orgId||"");setEditing(true);setMessage("")}}>Editar</button></div>):<p className="empty">Sin configuraciones registradas.</p>}
+    {rows.length?rows.map(row=><div className="item" key={row.id}><div style={{minWidth:0,overflowWrap:"anywhere"}}><b>{row.hostname}</b><div className="caption">{row.tenantId} · {row.appId}</div><div className="caption">Firebase: {row.firebase.projectId} · {row.status}</div></div><button className="btn outline" disabled={busy||row.status!=="draft"} onClick={()=>{setTenant(row.tenantId);setApp(row.appId);setFirebase(row.firebase);setOrg(row.orgId||"");setEditing(true);setMessage("");editorRef.current?.scrollIntoView({block:"start",behavior:"instant"})}}>Editar</button></div>):<p className="empty">Sin configuraciones registradas.</p>}
     </section>
   </>;
 }
