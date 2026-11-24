@@ -6,6 +6,7 @@ import Configurations from "@/components/configurations";
 import CatalogManagement from "@/components/catalog-management";
 import Installations from "@/components/installations";
 import ProductProvisioning from "@/components/product-provisioning";
+import ProviderConnections from "@/components/provider-connections";
 import {LayoutDashboard,Building2,Boxes,ShieldCheck,ScrollText,LogOut,Plus,RefreshCw,LockKeyhole,ChevronRight,Settings,Puzzle,ServerCog} from "lucide-react";
 type RecordItem={id:string;pausedImmediately?:boolean;name?:string;status?:string;description?:string;tenantId?:string;appId?:string;moduleId?:string;validUntil?:string;graceDays?:number;modules?:string[];action?:string;at?:string;actor?:string;target?:string;reason?:string};
 type Data={tenants:RecordItem[];apps:RecordItem[];modules:RecordItem[];licenses:RecordItem[];logs:RecordItem[];viewerRole?:"admin"|"superadmin"};
@@ -52,6 +53,7 @@ return <div className="shell"><aside className="side"><div className="brand spac
 {(["tenants","apps","modules","licenses"] as Tab[]).includes(tab)&&<CatalogManagement tab={tab as "tenants"|"apps"|"modules"|"licenses"} user={user} data={data} onRefresh={load} onManageLicense={id=>{setTransition(id);setReason("");}}/>}
 {tab==="apps"&&data.viewerRole==="superadmin"&&<ProductProvisioning key={user.uid} user={user} onRefresh={load}/>}
 {tab==="installations"&&<Installations user={user} tenants={data.tenants}/>}
+{tab==="configurations"&&data.viewerRole==="superadmin"&&<ProviderConnections key={user.uid} user={user}/>}
 {tab==="configurations"&&(data.viewerRole==="admin"||data.viewerRole==="superadmin")&&<Configurations user={user} tenants={data.tenants} apps={data.apps}/>}
 {tab==="audit"&&<section className="panel"><h3 className="subheading">Eventos auditados</h3>{data.logs.length?data.logs.map((a,i)=><div className="item" key={a.id||i}><div><b>{a.action}</b><div className="caption">{a.target} · {a.actor}</div><div className="caption">{a.at}</div></div></div>):<div className="empty">Todavía no hay eventos.</div>}</section>}
 {transition&&<form key={transition} className="panel license-transition" ref={revealTransition} aria-label="Cambiar estado de licencia" onSubmit={event=>{
