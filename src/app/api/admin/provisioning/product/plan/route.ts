@@ -2,7 +2,7 @@ import {NextRequest} from "next/server";
 import {staffIdentity,db,ok,fail,ApiError} from "@/lib/server";
 import {parseProductDiscoveryInput} from "@/lib/product-discovery";
 import {discoverProduct,DiscoveryUnavailable} from "@/lib/product-discovery-provider";
-import {buildProductRegistrationPlan} from "@/lib/product-registration-plan";
+import {prepareProductRegistration} from "@/lib/product-registration-plan";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export async function POST(req:NextRequest){
@@ -19,8 +19,9 @@ export async function POST(req:NextRequest){
   const registration=await db.runTransaction(async tx=>{
    const [apps,modules]=await Promise.all([tx.get(db.collection("apps").limit(501)),tx.get(db.collection("appModules").limit(501))]);
    if(apps.size>500||modules.size>500)throw new ApiError(409,"Catalog exceeds safe plan precheck limit");
-   return buildProductRegistrationPlan(discovery,{apps:apps.docs.map(x=>({id:x.id,data:x.data()})),modules:modules.docs.map(x=>({id:x.id,data:x.data()}))});
+   return prepareProductRegistration(discovery,{apps:apps.docs.map(x=>({id:x.id,data:x.data()})),modules:modules.docs.map(x=>({id:x.id,data:x.data()}))},discovery.release);
   },{readOnly:true});
-  return ok({...discovery,registration});
+  const {mutation,...review}=registration;
+  return ok({...discovery,registration:review});
  }catch(e){return fail(e)}
 }

@@ -27,5 +27,14 @@ export async function discoverProduct(input:ProductDiscoveryInput){
  if(f?.type!=="file"||f.path!=="nixinx.manifest.json"||f.encoding!=="base64"||typeof f.size!=="number"||f.size>64000||typeof f.content!=="string"||f.content.length>100000)throw new DiscoveryUnavailable("MANIFEST_UNAVAILABLE_OR_TOO_LARGE");
  let manifest:unknown;
  try{manifest=JSON.parse(Buffer.from(f.content,"base64").toString("utf8"))}catch{throw new DiscoveryUnavailable("INVALID_MANIFEST_JSON")}
- return reconcileProduct(input,{repository,branch,manifest,project,teamId:team});
+ const discovery=reconcileProduct(input,{repository,branch,manifest,project,teamId:team});
+ // Only accept the current production target, not a Preview or a successful build on another SHA.
+ let release:{deploymentId:string;sourceCommit:string}|null=null;
+ const deploymentId=project?.targets?.production?.id;
+ if(typeof deploymentId==="string"&&/^dpl_[A-Za-z0-9]{8,80}$/.test(deploymentId)){
+  const d=await readJson("https://api.vercel.com/v13/deployments/"+deploymentId+"?teamId="+encodeURIComponent(team),vercel,"application/json");
+  const gitSha=d?.gitSource?.sha??d?.meta?.githubCommitSha;
+  if(d?.id===deploymentId&&d?.projectId===input.vercelProjectId&&d?.target==="production"&&d?.readyState==="READY"&&gitSha===commit)release={deploymentId,sourceCommit:commit};
+ }
+ return {...discovery,release};
 }

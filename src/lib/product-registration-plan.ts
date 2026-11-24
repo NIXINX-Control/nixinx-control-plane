@@ -1,5 +1,6 @@
+import {createHash} from "node:crypto";
 // P02-02: reconcile existing catalog with trusted server-side discovery.
-// This is a plan only. No catalog mutations or activation are implemented.
+// Pure reconciliation and mutation preparation; Firestore writes occur only in the authenticated APPLY route.
 import type {reconcileProduct} from "./product-discovery";
 type Discovery=ReturnType<typeof reconcileProduct>;
 type Entry={id:string;data:Record<string,unknown>};
@@ -48,4 +49,38 @@ export function buildProductRegistrationPlan(discovery:Discovery,s:ProductCatalo
   status:steps.some(x=>x.action==="BLOCKED")?"BLOCKED":"REVIEW_REQUIRED",
   candidateModuleCount:steps.filter(x=>x.resource==="module"&&x.action==="CREATE_CANDIDATE").length,
   applyAuthorized:false,technicalReady:false,commercialAuthorized:false,writes:0};
+}
+
+type Release={deploymentId:string;sourceCommit:string}|null;
+type Bound={repository:string;vercelProjectId:string;sourceCommit:string;deploymentId:string;manifest:Discovery["manifest"]};
+const obj=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==="object"&&!Array.isArray(v));
+function stable(v:unknown):string{
+ if(Array.isArray(v))return "["+v.map(stable).join(",")+"]";
+ if(obj(v))return "{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+stable(v[k])).join(",")+"}";
+ return JSON.stringify(v)??"null";
+}
+export function prepareProductRegistration(discovery:Discovery,s:ProductCatalogSnapshot,release:Release){
+ const plan=buildProductRegistrationPlan(discovery,s);
+ const {appId,manifest,repository,vercelProjectId,sourceCommit}=discovery;
+ const app=s.apps.find(x=>x.id===appId);
+ const binding=app?.data.provisioning;
+ const problems:string[]=[];
+ if(plan.status==="BLOCKED")problems.push("CATALOG_CONFLICT");
+ if(!release||release.sourceCommit!==sourceCommit||!/^dpl_[A-Za-z0-9]{8,80}$/.test(release.deploymentId))problems.push("PRODUCTION_RELEASE_NOT_VERIFIED");
+ if(app&&binding===undefined&&app.data.name!==manifest.applicationName)problems.push("EXISTING_APP_NAME_REQUIRES_RECONCILIATION");
+ if(binding!==undefined&&(!obj(binding)||binding.repository!==repository||binding.vercelProjectId!==vercelProjectId))problems.push("EXISTING_PRODUCT_BINDING_CONFLICT");
+ for(const x of s.apps){
+  if(x.id===appId)continue;
+  const b=x.data.provisioning;
+  if(obj(b)&&((typeof b.repository==="string"&&b.repository.toLowerCase()===repository.toLowerCase())||b.vercelProjectId===vercelProjectId))problems.push("PROVIDER_ALREADY_BOUND_TO_ANOTHER_APP");
+ }
+ const next:Bound|null=release?{repository,vercelProjectId,sourceCommit,deploymentId:release.deploymentId,manifest}:null;
+ const moduleCreates=manifest.modules.filter(m=>plan.steps.some(x=>x.resource==="module"&&x.id===appId+"."+m.id&&x.action==="CREATE_CANDIDATE")).sort((a,b)=>a.id.localeCompare(b.id)).map(m=>({id:appId+"."+m.id,data:{appId,moduleId:m.id,name:m.name,status:"draft",verified:false}}));
+ const bindingChanged=Boolean(next&&stable(binding)!==stable(next));
+ const relevant=s.modules.filter(x=>x.id.toLowerCase().startsWith(appId.toLowerCase()+".")||(typeof x.data.appId==="string"&&x.data.appId.toLowerCase()===appId.toLowerCase())).sort((a,b)=>a.id.localeCompare(b.id)).map(x=>({id:x.id,name:x.data.name,status:x.data.status,verified:x.data.verified,appId:x.data.appId,moduleId:x.data.moduleId}));
+ const digest=createHash("sha256").update(stable({appId,next,problems,app:app?{id:app.id,name:app.data.name,status:app.data.status,binding}:null,relevant,steps:plan.steps})).digest("hex");
+ return {...plan,confirmationDigest:digest,releaseVerified:!problems.includes("PRODUCTION_RELEASE_NOT_VERIFIED"),problems,
+  canRegister:problems.length===0,requiresExistingAppAdoption:Boolean(app&&binding===undefined),
+  alreadyRegistered:problems.length===0&&Boolean(app)&&!bindingChanged&&moduleCreates.length===0,
+  mutation:{createApp:!app,writeBinding:bindingChanged,binding:next,moduleCreates}};
 }
