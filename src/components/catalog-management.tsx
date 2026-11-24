@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useMemo,useState} from "react";
+import {useCallback,useEffect,useMemo,useState} from "react";
 import type {User} from "firebase/auth";
 
 export type CatalogRow={
@@ -136,6 +136,7 @@ export default function CatalogManagement({
     }catch(e){setError(friendlyError(e));}finally{setBusy(false);}
   }
 
+  const revealEditor=useCallback((element:HTMLElement|null)=>{if(element)element.scrollIntoView({block:"start",behavior:"instant"});},[]);
   const tabLabel=tab==="tenants"?"cliente":tab==="apps"?"aplicación":tab==="modules"?"módulo":"licencia";
   return <>
     <div className="row spaced">
@@ -148,7 +149,7 @@ export default function CatalogManagement({
     </div>
     {message&&<p role="status" className="notice">{message}</p>}
     {error&&<p role="alert" className="error">{error}</p>}
-    {mode&&<section className="panel">
+    {mode&&<section className="panel" ref={revealEditor}>
       <h3 className="subheading">{mode==="edit"?"Editar":"Crear"} {tabLabel}</h3>
       <p className="caption">El identificador es la clave técnica permanente y nunca se renombra. El nombre visible sí puede editarse. Las bajas se archivan, no se eliminan físicamente.</p>
       <form className="fields" onSubmit={e=>{e.preventDefault();void save();}}>
@@ -239,12 +240,12 @@ export default function CatalogManagement({
         </div>
       </form>
     </section>}
-    <section className="panel">
+    <section className="panel record-list">
       <h3 className="subheading">Registros de {tab==="modules"?"módulos":tab==="apps"?"aplicaciones":tab==="tenants"?"clientes":"licencias"}</h3>
       {rows.length?rows.map(row=><div className="item" key={row.id}>
         <div style={{minWidth:0}}>
           <b>{tab==="modules"?label(row):tab==="licenses"?row.id:label(row)}</b>
-          <div className="caption">ID: {tab==="modules"?row.moduleId:row.id}
+          <div className="record-meta"><div className="caption">ID: {tab==="modules"?row.moduleId:row.id}
             {row.appId?" · Aplicación: "+row.appId:""}
             {row.tenantId?" · Cliente: "+row.tenantId:""}</div>
           {tab==="modules"&&<div className="caption">Aplicación: {data.apps.find(a=>a.id===row.appId)?.name||row.appId} · Manifiesto: {row.verified?"Verificado":"Pendiente"}</div>}
@@ -253,9 +254,9 @@ export default function CatalogManagement({
           {row.timeZone&&<div className="caption">Zona horaria: {row.timeZone}</div>}
           {(row.suspensionAt||row.servicesSuspensionAt)&&<div className="caption">Suspensión efectiva: {new Date((row.suspensionAt||row.servicesSuspensionAt)!).toLocaleString("es-CA",{timeZone:row.timeZone})}</div>}
           {row.servicesTerminatedAt&&<div className="caption">Servicios del cliente terminados</div>}
-          {row.status&&<div className="caption">Estado: {row.status}</div>}
+          {row.status&&<div className="caption">Estado: {row.status}</div>}</div>
         </div>
-        <div className="row" style={{flexWrap:"wrap",gap:8}}>
+        <div className="record-actions">
           <button className="btn outline tiny" disabled={busy} onClick={()=>startEdit(row)}>Editar</button>
           {tab==="licenses"&&<button className="btn outline tiny" disabled={busy} onClick={()=>onManageLicense(row.id)}>Estado</button>}
         </div>

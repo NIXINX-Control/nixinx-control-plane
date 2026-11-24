@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useState} from "react";
+import {useCallback,useEffect,useState} from "react";
 import type {User} from "firebase/auth";
 type Tenant={id:string;name?:string;status?:string};
 type Installation={hostname:string;tenantId:string;appId:string;environment:string;verified?:boolean;status:string;firebaseProjectId?:string;sandboxOrgId?:string;orgId?:string};
@@ -47,6 +47,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
    setDisable("");setReason("");await refresh();
   }catch(e){setError(e instanceof Error?e.message:"No se pudo deshabilitar")}finally{setBusy(false)}
  }
+ const revealDisable=useCallback((element:HTMLDivElement|null)=>{if(element)element.scrollIntoView({block:"start",behavior:"instant"});},[]);
  return <section className="panel">
   <h3 className="subheading">Instalaciones de Corporate</h3>
   <p className="caption">{production?"El superadministrador registra el dominio y cliente configurados para producción. La licencia se gestiona por separado.":"Control verifica el dominio y la configuración Firebase del piloto Preview."}</p>
@@ -76,7 +77,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
     </div>
     <button className="btn outline tiny" disabled={busy||i.status==="disabled"} onClick={()=>{setDisable(i.hostname);setReason("");setError("");}}>Deshabilitar</button>
    </div>)}
-  {disable&&<div className="panel" role="dialog" aria-label="Deshabilitar instalación">
+  {disable&&<div className="panel" ref={revealDisable} role="dialog" aria-label="Deshabilitar instalación">
    <h3 className="subheading">Deshabilitar {disable}</h3>
    <label className="field">Motivo obligatorio<textarea value={reason} rows={2} maxLength={500} onChange={e=>setReason(e.target.value)}/></label>
    <div className="row">
