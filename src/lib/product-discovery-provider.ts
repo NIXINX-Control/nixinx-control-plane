@@ -1,4 +1,5 @@
 import "server-only";
+import {getProviderToken,providerTeam} from "@/lib/provider-connections";
 import {parseProductDiscoveryInput,reconcileProduct,type ProductDiscoveryInput} from "@/lib/product-discovery";
 export class DiscoveryUnavailable extends Error {}
 async function readJson(url:string,token:string,accept:string){
@@ -10,10 +11,8 @@ export async function discoverProduct(input:ProductDiscoveryInput){
  // Provider authorization must be provisioned separately by NIXINX; never accept
  // credentials or arbitrary URLs from a caller, or fall back to another team.
  input=parseProductDiscoveryInput(input);
- const github=process.env.NIXINX_PROVISIONING_GITHUB_READ_TOKEN;
- const vercel=process.env.NIXINX_PROVISIONING_VERCEL_READ_TOKEN;
- const team=process.env.NIXINX_PROVISIONING_VERCEL_TEAM_ID;
- if(!github||!vercel||!team||!/^team_[A-Za-z0-9]{8,80}$/.test(team))throw new DiscoveryUnavailable("PROVIDER_CREDENTIALS_NOT_CONFIGURED");
+ let github:string,vercel:string,team:string;
+ try{team=providerTeam();[github,vercel]=await Promise.all([getProviderToken("github"),getProviderToken("vercel")])}catch{throw new DiscoveryUnavailable("PROVIDER_CREDENTIALS_NOT_CONFIGURED_OR_UNAVAILABLE")}
  const base="https://api.github.com/repos/"+input.repository;
  const accept="application/vnd.github+json";
  const [repository,branch,project]=await Promise.all([
