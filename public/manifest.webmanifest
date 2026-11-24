@@ -11,19 +11,19 @@
   "lang": "es",
   "icons": [
     {
-      "src": "/icon-192",
+      "src": "/icon-192?v=control1",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon",
+      "src": "/icon?v=control1",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon.svg",
+      "src": "/icon-control.svg?v=control1",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
