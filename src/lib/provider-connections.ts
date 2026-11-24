@@ -54,9 +54,12 @@ export async function saveProviderToken(id:ProviderId,token:string){
  if(!custodyProject())throw new ProviderConnectionError("CONTROL_VAULT_NOT_CONFIGURED");
  if(await probeProvider(id,token)!=="IDENTITY_VERIFIED")throw new ProviderConnectionError("PROVIDER_IDENTITY_NOT_VERIFIED");
  // Pre-created, fixed secret names only; no arbitrary project, secret ID, URL, or IAM change from the UI.
+ try{
+  if(await getProviderToken(id)===token)return {provider:id,status:"IDENTITY_VERIFIED",custody:"SECRET_MANAGER",operationPermissionsVerified:false,changed:false};
+ }catch(e){if(!(e instanceof ProviderConnectionError)||!["VAULT_SECRET_OR_VERSION_MISSING","VAULT_TOKEN_INVALID","PROVIDER_CREDENTIAL_NOT_CONFIGURED"].includes(e.message))throw e}
  const r=await secretRequest(id,"addVersion",token);
- if(typeof r?.name!=="string"||!r.name.endsWith("/"+secretIds[id]+"/versions/"+r.name.split("/").pop()))throw new ProviderConnectionError("VAULT_VERSION_WRITE_UNVERIFIED");
+ if(typeof r?.name!=="string"||!new RegExp("^projects/[a-zA-Z0-9-]+/secrets/"+secretIds[id]+"/versions/[1-9][0-9]*$").test(r.name))throw new ProviderConnectionError("VAULT_VERSION_WRITE_UNVERIFIED");
  const actual=await getProviderToken(id);
  if(actual!==token)throw new ProviderConnectionError("VAULT_READBACK_MISMATCH");
- return {provider:id,status:"IDENTITY_VERIFIED",custody:"SECRET_MANAGER",operationPermissionsVerified:false};
+ return {provider:id,status:"IDENTITY_VERIFIED",custody:"SECRET_MANAGER",operationPermissionsVerified:false,changed:true};
 }
