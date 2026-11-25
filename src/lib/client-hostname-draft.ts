@@ -5,6 +5,20 @@ const id=/^[A-Za-z0-9_-]{2,80}$/;
 const app=/^[a-z][a-z0-9-]{0,37}[a-z0-9]$/;
 const label=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const project=/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+export function canonicalTenantDnsSlug(tenantId:unknown):string{
+ if(typeof tenantId!=="string"||!id.test(tenantId)||!label.test(tenantId.toLowerCase()))throw Error("TENANT_DNS_RECONCILIATION_REQUIRED");
+ return tenantId.toLowerCase();
+}
+export function canonicalHostname(tenantId:unknown,appId:unknown):string{
+ if(typeof appId!=="string"||!app.test(appId))throw Error("HOSTNAME_APP_INVALID");
+ return canonicalTenantDnsSlug(tenantId)+"."+appId+".nixinx.app";
+}
+export function assertTenantDnsIdentity(tenantId:string,tenant:Obj|undefined,catalog:{id:string;data:Obj}[],registry:Obj|undefined){
+ const slug=canonicalTenantDnsSlug(tenantId);
+ if(!tenant||tenant.status!=="active"||catalog.length>500||!catalog.some(x=>x.id===tenantId)||catalog.some(x=>x.id!==tenantId&&(x.id.toLowerCase()===slug||x.data.dnsSlug===slug)))throw Error("TENANT_DNS_CONFLICT_REVIEW_REQUIRED");
+ if((tenant.dnsSlug!==undefined&&tenant.dnsSlug!==slug)||(registry&&(registry.tenantId!==tenantId||registry.dnsSlug!==slug))||(tenant.dnsSlug!==undefined&&!registry)||(registry&&tenant.dnsSlug!==slug))throw Error("TENANT_DNS_CONFLICT_REVIEW_REQUIRED");
+ return {slug,registered:registry!==undefined};
+}
 export function validDraftHostname(hostname:unknown,appId:unknown):hostname is string{
  if(typeof hostname!=="string"||typeof appId!=="string"||!app.test(appId))return false;
  const parts=hostname.split(".");
@@ -12,6 +26,7 @@ export function validDraftHostname(hostname:unknown,appId:unknown):hostname is s
 }
 export function parseHostnameApproval(v:unknown){
  if(!obj(v)||Object.keys(v).length!==4||Object.keys(v).some(k=>!["tenantId","appId","hostname","confirmed"].includes(k))||typeof v.tenantId!=="string"||!id.test(v.tenantId)||typeof v.appId!=="string"||!validDraftHostname(v.hostname,v.appId)||v.confirmed!==true)throw Error("HOSTNAME_APPROVAL_INVALID");
+ if(v.hostname!==canonicalHostname(v.tenantId,v.appId))throw Error("HOSTNAME_NOT_CANONICAL");
  return {tenantId:v.tenantId,appId:v.appId,hostname:v.hostname};
 }
 export type HostnameIdentity={tenantId:string;appId:string;hostname:string;projectId:string;projectNumber:string;webAppId:string;vercelProjectId:string;sourceCommit:string};
