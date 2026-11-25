@@ -2,7 +2,8 @@ import {NextRequest} from "next/server";
 import {superadminUser,db,ok,fail,ApiError} from "@/lib/server";
 import {existingIdPattern} from "@/lib/client-provisioning";
 import {parseClientGoogleBinding,restoreClientGoogleBinding,sameBinding,assertProjectOwner,type ClientGoogleBinding} from "@/lib/client-google-binding";
-import {discoverDelegatedClient} from "@/lib/client-google-delegation";
+import {discoverDelegatedClient,acquireDelegatedGoogleToken} from "@/lib/client-google-delegation";
+import {probeProjectPermissions} from "@/lib/google-permission-preflight";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export const maxDuration=60;
@@ -16,7 +17,7 @@ export async function GET(req:NextRequest){
   const id=req.nextUrl.searchParams.get("tenantId")||"";if(!existingIdPattern.test(id))throw new ApiError(400,"GOOGLE_TENANT_INVALID");
   const [s,t]=await Promise.all([db.collection("clientProvisioning").doc(id).get(),db.collection("tenants").doc(id).get()]);
   const d=s.data();verifyIntake(d,t.data(),id);
-  return ok({binding:d?.googleBinding??null,inventory:d?.googleInventory??null});
+  return ok({binding:d?.googleBinding??null,inventory:d?.googleInventory??null,permissionPreflight:d?.googlePermissionPreflight??null});
  }catch(e){return fail(e)}
 }
 export async function POST(req:NextRequest){
@@ -48,12 +49,28 @@ export async function POST(req:NextRequest){
    if(!actual||!sameBinding(restoreClientGoogleBinding(actual.googleBinding,id,actual.appId),result.binding))throw new ApiError(409,"GOOGLE_BINDING_READBACK_FAILED");
    return ok({...result,status:"BINDING_SAVED",delegationVerified:false});
   }
-  if(input.action!=="discover"||Object.keys(input).some(k=>!["action","tenantId"].includes(k)))throw new ApiError(400,"GOOGLE_REQUEST_INVALID");
+  if(!["discover","permissions"].includes(input.action)||Object.keys(input).some(k=>!["action","tenantId"].includes(k)))throw new ApiError(400,"GOOGLE_REQUEST_INVALID");
   const [s,t]=await Promise.all([ref.get(),tenantRef.get()]);const d=s.data();verifyIntake(d,t.data(),id);
   const b=restoreClientGoogleBinding(d!.googleBinding,id,d!.appId);
   if(!d!.googleBindingAuthorizedAt||!d!.googleBindingAuthorizedBy)throw new ApiError(409,"GOOGLE_OWNER_AUTHORIZATION_REQUIRED");
   const ownerRef=db.collection("firebaseProjectOwners").doc(b.projectId),owner=await ownerRef.get();
   if(!owner.exists)throw new ApiError(409,"GOOGLE_PROJECT_OWNERSHIP_CONFLICT");assertProjectOwner(owner.data(),b);
+  if(input.action==="permissions"){
+   if(d!.googleMetadataDiscoveryVerified!==true||!d!.googleInventory?.verifiedAt)throw new ApiError(409,"GOOGLE_INVENTORY_REQUIRED");
+   let result;try{result=await probeProjectPermissions(b.projectNumber,await acquireDelegatedGoogleToken(b,req.headers.get("x-vercel-oidc-token"),process.env.VERCEL_ENV))}catch(e){throw new ApiError(409,code(e))}
+   const at=new Date().toISOString(),inventoryAt=d!.googleInventory.verifiedAt;
+   await db.runTransaction(async tx=>{
+    const [current,tenant,ownership]=await Promise.all([tx.get(ref),tx.get(tenantRef),tx.get(ownerRef)]);
+    const x=current.data();verifyIntake(x,tenant.data(),id);
+    if(!ownership.exists||!sameBinding(restoreClientGoogleBinding(x!.googleBinding,id,x!.appId),b)||x!.googleInventory?.verifiedAt!==inventoryAt||!x!.googleBindingAuthorizedAt||!x!.googleBindingAuthorizedBy)throw new ApiError(409,"GOOGLE_BINDING_CHANGED");
+    assertProjectOwner(ownership.data(),b);
+    tx.update(ref,{googlePermissionPreflight:{...result,verifiedAt:at,inventoryAt}});
+    tx.create(db.collection("audit").doc(),{actor,action:"CHECK_GOOGLE_PROJECT_PERMISSIONS",target:id,appId:b.appId,at,status:result.status});
+   });
+   const actual=(await ref.get()).data()?.googlePermissionPreflight;
+   if(actual?.verifiedAt!==at)throw new ApiError(409,"GOOGLE_PERMISSION_READBACK_FAILED");
+   return ok({status:result.status,permissionPreflight:actual,technicalReady:false,commercialAuthorized:false});
+  }
   let inventory;try{inventory=await discoverDelegatedClient(b,req.headers.get("x-vercel-oidc-token"),process.env.VERCEL_ENV)}catch(e){throw new ApiError(409,code(e))}
   const at=new Date().toISOString();
   await db.runTransaction(async tx=>{
