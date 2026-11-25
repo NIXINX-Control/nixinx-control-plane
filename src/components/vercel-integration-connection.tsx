@@ -1,0 +1,20 @@
+"use client";
+import {useState} from "react";
+import type {User} from "firebase/auth";
+type Connection={status:string;installationId?:string|number;expiresAt?:string};
+export default function VercelIntegrationConnection({user,vault,row,onRefresh}:{user:User;vault:boolean;row?:Connection;onRefresh:()=>Promise<void>}){
+ const [open,setOpen]=useState(false),[id,setId]=useState(""),[secret,setSecret]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
+ async function action(body:Record<string,string>){const r=await fetch("/api/admin/provisioning/connections/vercel",{method:"POST",headers:{authorization:"Bearer "+await user.getIdToken(),"content-type":"application/json"},body:JSON.stringify(body),cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"VERCEL_INTEGRATION_UNVERIFIED");return d}
+ async function save(){setBusy(true);setError("");setMessage("");try{await action({action:"saveRoot",clientId:id.trim(),clientSecret:secret});setOpen(false);await onRefresh();setMessage("Credenciales raíz guardadas; ahora autoriza la instalación corporativa.")}catch(e){setError((e as Error).message)}finally{setSecret("");setBusy(false)}}
+ async function authorize(){setBusy(true);setError("");try{const d=await action({action:"start"});const u=new URL(d.url);if(u.origin!=="https://vercel.com"||u.pathname!=="/integrations/nixinx-control-provisioning/new")throw new Error("VERCEL_INSTALLATION_URL_INVALID");window.location.assign(u.href)}catch(e){setError((e as Error).message);setBusy(false)}}
+ const status=row?.status;
+ return <div style={{marginTop:16}}><h3>Vercel Integration</h3><p role="status"><b>{status==="IDENTITY_VERIFIED"?"Instalación e identidad verificadas; permisos de operación pendientes":status==="VERCEL_INSTALLATION_PENDING"?"Autoriza la instalación corporativa":status==="VAULT_SECRET_OR_VERSION_MISSING"?"Credenciales raíz pendientes":"Revisión requerida"}</b></p><p className="caption">{status||"Sin verificación"} · SECRET_MANAGER</p>
+ <p>Integración privada NIXINX Control Provisioning. Tokens de una hora emitidos automáticamente; no se aceptan tokens personales.</p><p><a style={{textDecoration:"underline",color:"#176b58"}} href="https://vercel.com/dashboard/integrations/console" target="_blank" rel="noreferrer">Integrations Console</a></p>
+ <p className="caption" style={{overflowWrap:"anywhere"}}>Redirect URL: https://controlde.nixinx.org/api/integrations/vercel/callback</p>
+ {row?.installationId&&<p className="caption">Instalación verificada: {row.installationId}. Expiración del token de prueba: {row.expiresAt}.</p>}
+ {error&&<p role="alert" className="error">{error}</p>}{message&&<p role="status">{message}</p>}
+ <button type="button" className="btn secondary" disabled={!vault||busy||status==="IDENTITY_VERIFIED"} aria-expanded={open} onClick={()=>{setOpen(true);setId("");setSecret("");setError("");setMessage("")}}>Configurar Vercel Integration</button>
+ {open&&<form style={{marginTop:12,padding:16,border:"1px solid #a6c9be",borderRadius:10}} onSubmit={e=>{e.preventDefault();void save()}}><p>Captura Client ID y Client Secret desde la consola de la integración privada. Se guardan en Secret Manager; la autorización se verifica en el siguiente paso.</p><label>Client ID<input autoFocus style={{display:"block",width:"100%",boxSizing:"border-box"}} required maxLength={104} value={id} disabled={busy} onChange={e=>setId(e.target.value)}/></label><label>Client Secret<input type="password" autoComplete="off" style={{display:"block",width:"100%",boxSizing:"border-box"}} required maxLength={512} value={secret} disabled={busy} onChange={e=>setSecret(e.target.value)}/></label><button className="btn" type="submit" disabled={busy||!id||secret.length<16}>Guardar credenciales raíz</button> <button type="button" className="btn secondary" disabled={busy} onClick={()=>{setSecret("");setId("");setOpen(false)}}>Cancelar</button></form>}
+ <p><button type="button" className="btn" disabled={!vault||busy||status!=="VERCEL_INSTALLATION_PENDING"} onClick={()=>void authorize()}>Autorizar instalación NIXINX</button></p>
+ </div>
+}
