@@ -2,6 +2,7 @@
 import {useState,useEffect,useCallback,useRef} from "react";
 import type {User} from "firebase/auth";
 import VercelIntegrationConnection from "@/components/vercel-integration-connection";
+import GoogleFederationConnection from "@/components/google-federation-connection";
 type Connection={provider:string;custody:string;status:string;operationPermissionsVerified:boolean;installationId?:number|string;expiresAt?:string};
 export default function ProviderConnections({user}:{user:User}){
  const [rows,setRows]=useState<Connection[]>([]),[vault,setVault]=useState(false),[open,setOpen]=useState(false),[key,setKey]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
@@ -25,5 +26,6 @@ export default function ProviderConnections({user}:{user:User}){
  <label>Archivo PEM<input ref={input} type="file" accept=".pem" required disabled={busy} style={{display:"block",width:"100%",maxWidth:"100%",marginTop:8}} onChange={async e=>{const f=e.target.files?.[0];setKey("");setError("");if(!f)return;if(f.size>8192){setError("Archivo demasiado grande");return}try{setKey(await f.text())}catch{setError("No se pudo leer el archivo")}}}/></label>
  <button type="submit" className="btn" disabled={busy||!key}>Validar y guardar</button> <button type="button" className="btn secondary" disabled={busy} onClick={()=>{clear();setOpen(false)}}>Cancelar</button></form>}</div>
  <VercelIntegrationConnection user={user} vault={vault} row={rows.find(x=>x.provider==="vercel")} onRefresh={load}/>
- <h3>Próximas conexiones</h3><p className="caption">Google Cloud / Firebase / BigQuery / IAM, Looker Studio Pro y Stripe: pendientes de adaptadores y autorización efectiva.</p></section>
+ <GoogleFederationConnection user={user}/>
+ <h3>Próximas conexiones</h3><p className="caption">Delegación Google Cloud por cliente, Firebase / BigQuery / IAM, Looker Studio Pro y Stripe: pendientes de autorización efectiva y pruebas.</p></section>
 }
