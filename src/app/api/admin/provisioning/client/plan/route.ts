@@ -1,10 +1,12 @@
 import {NextRequest} from "next/server";
 import {superadminUser,db,ok,fail,ApiError} from "@/lib/server";
+import {clientProviderPreflight} from "@/lib/client-provider-preflight-provider";
 import {existingIdPattern} from "@/lib/client-provisioning";
 import {buildClientInstallationPreview} from "@/lib/client-installation-preview";
 import {canonicalHostname,hostnameIdentity,inspectCanonicalHostname,canonicalTenantDnsSlug,assertTenantDnsIdentity} from "@/lib/client-hostname-draft";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
+export const maxDuration=60;
 export async function GET(req:NextRequest){
  try{
   await superadminUser(req);
@@ -38,8 +40,15 @@ export async function GET(req:NextRequest){
      hostnameEvidence={reason:["TENANT_DNS_RECONCILIATION_REQUIRED","TENANT_DNS_CONFLICT_REVIEW_REQUIRED","HOSTNAME_CONFLICT_REVIEW_REQUIRED","HOSTNAME_BINDING_IMMUTABLE","HOSTNAME_NOT_CANONICAL","HOSTNAME_APP_INVALID","HOSTNAME_INTAKE_NOT_ELIGIBLE"].includes(reason)?reason:"HOSTNAME_VALIDATION_UNAVAILABLE"};
     }
    }
-   return buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),hostnameEvidence);
+   const plan=buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),hostnameEvidence);
+   const r=d.requirements;
+   const providerInput=plan.hostname&&plan.sourceCommit&&typeof r?.repository==="string"&&typeof r?.vercelProjectId==="string"&&typeof r?.deploymentId==="string"?{appId:plan.appId,repository:r.repository,vercelProjectId:r.vercelProjectId,sourceCommit:plan.sourceCommit,deploymentId:r.deploymentId,hostname:plan.hostname}:null;
+   return {plan,providerInput};
   },{readOnly:true});
-  return ok(result);
+  const plan=result.plan;
+  // Provider network reads outside Firestore transaction. No external mutations or stored attestations.
+  if(result.providerInput){const evidence=await clientProviderPreflight(result.providerInput);const step=plan.steps.find(s=>s.resource==="release");if(step){step.status=evidence.status;step.reason=evidence.reason;step.evidence=evidence.checkedAt;}
+   return ok({...plan,providerEvidence:evidence});}
+  return ok(plan);
  }catch(e){return fail(e)}
 }
