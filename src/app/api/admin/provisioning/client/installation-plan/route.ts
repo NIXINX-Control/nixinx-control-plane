@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     });
     const saved = (await ref.get()).data();
     if (saved?.planId !== planId || saved.applyAuthorized !== false) throw new ApiError(503,"INSTALLATION_PLAN_READBACK_FAILED");
-    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt}});
+    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt,version:spec.version}});
   } catch (error) { return fail(error); }
 }
 
@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
     await superadminUser(req);
     const snapshot = await scope(req).orderBy("createdAt","desc").limit(1).get();
     const latest = snapshot.docs[0]?.data();
-    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt} : null});
+    const execution = latest?.version === 2 ? (await snapshot.docs[0].ref.collection("execution").doc("runtime").get()).data() : undefined;
+    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt,version:latest.version,stagedAt:execution?.status==="STAGED_INACTIVE" ? execution.createdAt : null} : null});
   } catch (error) { return fail(error); }
 }
