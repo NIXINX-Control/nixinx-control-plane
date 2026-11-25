@@ -23,6 +23,6 @@ export default function ProductProvisioning({user,onRefresh}:{user:User;onRefres
  {error&&<p role="alert" className="error">{error}</p>}{message&&<p role="status">{message}</p>}
  {plan&&<div><p className="caption">Commit: {plan.sourceCommit}</p>{plan.registration.steps.map((s,i)=><div key={s.resource+s.id+i} className="item"><div><b>{s.id}</b><div className="caption">{s.reason}</div></div><span>{s.action}</span></div>)}
  {plan.registration.problems.map(p=><p key={p} className="error">{p}</p>)}
- {plan.registration.requiresExistingAppAdoption&&<label className="field row" style={{justifyContent:"flex-start",flexWrap:"nowrap",margin:"12px 0"}}><input type="checkbox" checked={adopt} disabled={busy} onChange={e=>setAdopt(e.target.checked)}/> Confirmo vincular el registro existente a estos proveedores.</label>}
+ {plan.registration.requiresExistingAppAdoption&&<label className="field row" style={{display:"flex",justifyContent:"flex-start",flexWrap:"nowrap",margin:"12px 0"}}><input type="checkbox" checked={adopt} disabled={busy} onChange={e=>setAdopt(e.target.checked)}/> Confirmo vincular el registro existente a estos proveedores.</label>}
  <button className="btn" disabled={busy||!plan.registration.canRegister||(plan.registration.requiresExistingAppAdoption&&!adopt)} onClick={()=>void send("apply")}>{plan.registration.alreadyRegistered?"Verificar registro":"Registrar producto (APPLY)"}</button></div>}</section>
 }
