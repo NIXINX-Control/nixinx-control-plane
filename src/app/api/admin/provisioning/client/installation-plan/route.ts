@@ -82,6 +82,7 @@ export async function GET(req: NextRequest) {
     const snapshot = await scope(req).orderBy("createdAt","desc").limit(1).get();
     const latest = snapshot.docs[0]?.data();
     const execution = latest?.version === 2 ? (await snapshot.docs[0].ref.collection("execution").doc("runtime").get()).data() : undefined;
-    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt,version:latest.version,stagedAt:execution?.status==="STAGED_INACTIVE" ? execution.createdAt : null} : null});
+    const pilot = execution ? (await snapshot.docs[0].ref.collection("execution").doc("pilotOperator").get()).data() : undefined;
+    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt,version:latest.version,pilotEmail:pilot?.email??null,pilotStatus:pilot?.status??null,stagedAt:execution?.status==="STAGED_INACTIVE" ? execution.createdAt : null} : null});
   } catch (error) { return fail(error); }
 }
