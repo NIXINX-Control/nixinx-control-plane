@@ -31,8 +31,8 @@ export async function stagedInitiativesRelease(registeredCommit:string, register
   const sha = (deployment:{gitSource?:{sha?:string};meta?:{githubCommitSha?:string}}) =>
     deployment.gitSource?.sha ?? deployment.meta?.githubCommitSha;
   if(live.id!==registeredDeployment || live.projectId!==project || sha(live)!==registeredCommit ||
-     routing.reason!=="NOT_ASSIGNED_IN_VISIBLE_TEAM_APEX" || !("dns" in routing) ||
-     routing.dns.reason!=="DNS_PROVIDER_CONFIG_NO_REPORTED_CONFLICT_ASSIGNMENT_PENDING") throw Error("STAGED_ROUTING_MISMATCH");
+     routing.reason!=="NOT_ASSIGNED_IN_VISIBLE_TEAM_APEX" ||
+     routing.dns?.reason!=="DNS_PROVIDER_CONFIG_NO_REPORTED_CONFLICT_ASSIGNMENT_PENDING") throw Error("STAGED_ROUTING_MISMATCH");
   const match = list.deployments?.find((d:{uid?:string;meta?:{githubCommitSha?:string}})=>d.meta?.githubCommitSha===product.sourceCommit);
   if(!match || !/^dpl_[a-zA-Z0-9]+$/.test(match.uid)) throw Error("STAGED_DEPLOYMENT_MISSING");
   const deployment = await read("v13/deployments/"+match.uid);
