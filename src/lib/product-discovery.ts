@@ -21,7 +21,7 @@ const strings=(v:unknown,pattern:RegExp,max:number):v is string[]=>Array.isArray
 const keys=["apiKey","authDomain","projectId","storageBucket","messagingSenderId","appId"];
 const resources=new Set(["cloud-run","secret-manager","bigquery","firebase-storage","stripe"]);
 const dataPlanes=new Set(["firebase-auth","firestore"]);
-const accessModes=new Set(["operational-without-individual-login","email-password-admin","authenticated-user"]);
+const accessModes=new Set(["operational-without-individual-login","email-password-admin","authenticated-user","individual"]);
 const allowedList=(v:unknown,allowed:Set<string>):v is string[]=>strings(v,/^[a-z][a-z0-9-]{1,62}$/,20)&&v.every(x=>allowed.has(x));
 const relativeSource=/^src\/[A-Za-z0-9_/-]+\.(?:ts|tsx|js|jsx)$/;
 function label(v:unknown):v is string{return typeof v==="string"&&v.trim().length>0&&v.length<=120&&!/[\u0000-\u001f]/.test(v)}
