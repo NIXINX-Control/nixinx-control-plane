@@ -24,5 +24,5 @@ test("exchange and short token must match trusted installation and team",()=>{
  assert.equal(p.parseShortToken(b,id,now).expiresAt,now+3600000);
  assert.throws(()=>p.parseShortToken({...b,installation_id:"icfg_other123"},id,now));
  assert.throws(()=>p.parseShortToken({...b,expires_in:999999},id,now));
- assert.throws(()=>p.parseShortToken({...b,scope:"read:project"},id,now));
+ assert.throws(()=>p.parseShortToken({...b,scope:""},id,now));
 });

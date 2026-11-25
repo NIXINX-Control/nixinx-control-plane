@@ -11,8 +11,10 @@ function expectedTeam(){if(process.env.NIXINX_PROVISIONING_VERCEL_TEAM_ID!==corp
 function safe(e:unknown){const m=e instanceof Error?e.message:"";return /^[A-Z][A-Z0-9_]{1,80}$/.test(m)?m:"VERCEL_INTEGRATION_UNVERIFIED"}
 async function storedRoot(){try{return parseVercelRoot(JSON.parse(await readVercelRoot()))}catch(e){if(e instanceof ProviderConnectionError)throw e;throw new ProviderConnectionError("VAULT_VERCEL_ROOT_INVALID")}}
 async function tokenCall(root:VercelRoot,fields:Record<string,string>){
+ const exchange=fields.grant_type==="authorization_code";
+ const form=exchange?{...fields,client_id:root.clientId,client_secret:root.clientSecret}:fields;
  let r:Response;
- try{r=await fetch("https://api.vercel.com/v2/oauth/access_token",{method:"POST",headers:{Authorization:"Basic "+Buffer.from(root.clientId+":"+root.clientSecret).toString("base64"),"Content-Type":"application/x-www-form-urlencoded",Accept:"application/json"},body:new URLSearchParams(fields),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(10000)})}catch{throw new ProviderConnectionError("VERCEL_TOKEN_ENDPOINT_UNAVAILABLE")}
+ try{r=await fetch("https://api.vercel.com/v2/oauth/access_token",{method:"POST",headers:{...(exchange?{}:{Authorization:"Basic "+Buffer.from(root.clientId+":"+root.clientSecret).toString("base64")}),"Content-Type":"application/x-www-form-urlencoded",Accept:"application/json"},body:new URLSearchParams(form),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(10000)})}catch{throw new ProviderConnectionError("VERCEL_TOKEN_ENDPOINT_UNAVAILABLE")}
  if(!r.ok)throw new ProviderConnectionError(r.status===429?"VERCEL_TOKEN_RATE_LIMITED":r.status===401||r.status===403?"VERCEL_AUTHORIZATION_DENIED":"VERCEL_TOKEN_EXCHANGE_FAILED");
  return r.json();
 }
@@ -21,6 +23,17 @@ async function verifyTeam(token:string){
  if(!r.ok)throw new ProviderConnectionError("VERCEL_TEAM_READ_FAILED");
  const b=await r.json();
  if(b.id!==corporateTeam)throw new ProviderConnectionError("VERCEL_TEAM_MISMATCH");
+}
+async function verifyInstallationRead(token:string,id:string){
+ const team=expectedTeam();
+ const headers={Authorization:"Bearer "+token,Accept:"application/json"};
+ const [c,p]=await Promise.all([
+  fetch("https://api.vercel.com/v1/integrations/configuration/"+id+"?teamId="+team,{headers,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(8000)}),
+  fetch("https://api.vercel.com/v9/projects?teamId="+team+"&limit=1",{headers,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(8000)})
+ ]);
+ if(!c.ok||!p.ok)throw new ProviderConnectionError("VERCEL_INSTALLATION_READ_SCOPE_UNVERIFIED");
+ const [configuration,projects]=await Promise.all([c.json(),p.json()]);
+ if(configuration.id!==id||!Array.isArray(projects.projects))throw new ProviderConnectionError("VERCEL_INSTALLATION_READ_UNVERIFIED");
 }
 async function issue(root:VercelRoot,id:string){
  expectedTeam();
@@ -47,7 +60,7 @@ export async function getVercelIntegrationToken(){
 export async function vercelConnectionStatus(){
  try{
   const {root,id}=await active(),t=await tokenFor(root,id,true);
-  await verifyTeam(t.token);
+  await Promise.all([verifyTeam(t.token),verifyInstallationRead(t.token,id)]);
   return {provider:"vercel",custody:"SECRET_MANAGER",status:"IDENTITY_VERIFIED",operationPermissionsVerified:false,installationId:id,expiresAt:new Date(t.expiresAt).toISOString()};
  }catch(e){return {provider:"vercel",custody:"SECRET_MANAGER",status:safe(e),operationPermissionsVerified:false}}
 }

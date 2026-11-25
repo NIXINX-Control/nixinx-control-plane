@@ -19,8 +19,8 @@ export function verifyExchange(v:unknown,expected:string){
 export function parseShortToken(v:unknown,id:string,now=Date.now()){
  const b=v as {access_token?:string;token_type?:string;expires_in?:number;installation_id?:string;team_id?:string;scope?:string}|null;
  if(!b||b.team_id!==corporateTeam||b.installation_id!==id||b.token_type?.toLowerCase()!=="bearer"||typeof b.access_token!=="string"||b.access_token.length<16||b.access_token.length>8192||! /^[\x21-\x7e]+$/.test(b.access_token)||typeof b.expires_in!=="number"||!Number.isFinite(b.expires_in)||b.expires_in<120||b.expires_in>3900||typeof b.scope!=="string")throw new Error("VERCEL_SHORT_TOKEN_UNVERIFIED");
- const scopes=b.scope.split(/\s+/);
- if(!["read:project","write:project"].some(s=>scopes.includes(s))||!["read:team","write:team"].some(s=>scopes.includes(s))||!["read:integration-configuration","write:integration-configuration"].some(s=>scopes.includes(s)))throw new Error("VERCEL_REQUIRED_READ_SCOPES_MISSING");
+ if(!b.scope.trim())throw new Error("VERCEL_REQUIRED_READ_SCOPES_MISSING");
+ // Actual team, installation and project read requests verify access; do not guess write-scope labels.
  return {token:b.access_token,expiresAt:now+b.expires_in*1000};
 }
 export function safeNext(v:string|null){
