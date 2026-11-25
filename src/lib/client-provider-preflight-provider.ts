@@ -2,7 +2,16 @@ import "server-only";
 import {getProviderToken,providerTeam} from "@/lib/provider-connections";
 import {discoverProduct} from "@/lib/product-discovery-provider";
 import {inspectApexRouting,inspectRegisteredRelease,inspectDnsConfig} from "@/lib/client-provider-preflight";
-export async function clientProviderPreflight(input:{appId:string;repository:string;vercelProjectId:string;sourceCommit:string;deploymentId:string;hostname:string}){
+type ProviderEvidence = {
+ status:"BLOCKED"|"VERIFY";
+ reason:string;
+ checkedAt:string;
+ releaseVerified?:boolean;
+ scope?:string;
+ dnsVerified?:boolean;
+ dns?:{status:"VERIFY"|"BLOCKED";reason:string};
+};
+export async function clientProviderPreflight(input:{appId:string;repository:string;vercelProjectId:string;sourceCommit:string;deploymentId:string;hostname:string}):Promise<ProviderEvidence>{
  const at=new Date().toISOString();
  const fail=(reason:string)=>({status:"BLOCKED" as const,reason,checkedAt:at});
  let release;
@@ -11,7 +20,7 @@ export async function clientProviderPreflight(input:{appId:string;repository:str
  return readRoutingEvidence(input);
 }
 
-export async function readRoutingEvidence(input:{vercelProjectId:string;hostname:string}){
+export async function readRoutingEvidence(input:{vercelProjectId:string;hostname:string}):Promise<ProviderEvidence>{
  const at=new Date().toISOString();
  const fail=(reason:string)=>({status:"BLOCKED" as const,reason,checkedAt:at});
  try{
