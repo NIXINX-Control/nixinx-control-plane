@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     });
     const saved = (await ref.get()).data();
     if (saved?.planId !== planId || saved.applyAuthorized !== false) throw new ApiError(503,"INSTALLATION_PLAN_READBACK_FAILED");
-    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt,version:spec.version}});
+    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt,version:spec.version,accessMode:spec.accessMode}});
   } catch (error) { return fail(error); }
 }
 
