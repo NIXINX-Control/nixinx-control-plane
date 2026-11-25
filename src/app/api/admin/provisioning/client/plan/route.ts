@@ -42,7 +42,7 @@ export async function GET(req:NextRequest){
    }
    const plan=buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),hostnameEvidence);
    const r=d.requirements;
-   const providerInput=plan.hostname&&plan.sourceCommit&&typeof r?.repository==="string"&&typeof r?.vercelProjectId==="string"&&typeof r?.deploymentId==="string"?{appId:plan.appId,repository:r.repository,vercelProjectId:r.vercelProjectId,sourceCommit:plan.sourceCommit,deploymentId:r.deploymentId,hostname:plan.hostname}:null;
+   const providerInput=plan.hostname&&typeof plan.sourceCommit==="string"&&typeof r?.repository==="string"&&typeof r?.vercelProjectId==="string"&&typeof r?.deploymentId==="string"?{appId:plan.appId,repository:r.repository,vercelProjectId:r.vercelProjectId,sourceCommit:plan.sourceCommit,deploymentId:r.deploymentId,hostname:plan.hostname}:null;
    return {plan,providerInput};
   },{readOnly:true});
   const plan=result.plan;
