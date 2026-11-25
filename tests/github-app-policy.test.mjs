@@ -30,3 +30,10 @@ test("read discovery tokens are scoped and expiry verified",()=>{
  assert.throws(()=>p.parseInstallationToken({...t,permissions:{...t.permissions,administration:"write"}},now));
  assert.throws(()=>p.parseInstallationToken({...t,expires_at:new Date(now).toISOString()},now));
 });
+
+test("accepts both legacy and stateless installation tokens as opaque strings",()=>{
+ const now=Date.now(),base={expires_at:new Date(now+3600000).toISOString(),permissions:{contents:"read",metadata:"read"}};
+ for(const token of ["ghs_legacy123","ghs_5914516_eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ."+ "a_-Z".repeat(130)])assert.equal(p.parseInstallationToken({...base,token},now).token,token);
+ for(const token of ["","a b","a\r\nb","a\u0000b"])assert.throws(()=>p.parseInstallationToken({...base,token},now));
+ assert.throws(()=>p.parseInstallationToken({...base,token:"ghs_5914516_a.b.c",permissions:{contents:"write",metadata:"read"}},now));
+});
