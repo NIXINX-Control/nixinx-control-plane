@@ -1,14 +1,14 @@
 "use client";
 import {useState,useEffect} from "react";
 import type {User} from "firebase/auth";
-type Profile={tenantId:string;legalName:string;legalIdentifier:string;jurisdiction:string;contactEmail:string;appId:string};
-type Intake={tenantId:string;appId:string;hostname:string;status:string;profile:Profile;requirements:{sourceCommit:string;requiredResources:string[];derivedFirebaseKeys:string[];conditionalResources:string[];steps:{id:string;status:string;owner:string;instruction:string}[]}};
+type Profile={mode?:"existing";tenantId:string;legalName:string;legalIdentifier:string;jurisdiction:string;contactEmail:string;appId:string};
+type Intake={tenantId:string;appId:string;hostname:string|null;status:string;catalogTenantReused?:boolean;profile:Profile;requirements:{sourceCommit:string;requiredResources:string[];derivedFirebaseKeys:string[];conditionalResources:string[];steps:{id:string;status:string;owner:string;instruction:string}[]}};
 type Summary={tenantId:string;appId:string;status:string};
 const blank:Profile={tenantId:"",legalName:"",legalIdentifier:"",jurisdiction:"",contactEmail:"",appId:""};
-export default function ClientProvisioning({user,apps}:{user:User;apps:{id:string;name?:string;status?:string}[]}){
+export default function ClientProvisioning({user,apps,tenants}:{user:User;apps:{id:string;name?:string;status?:string}[];tenants:{id:string;name?:string;status?:string}[]}){
  const [draft,setDraft]=useState<Profile>(blank),[record,setRecord]=useState<Intake|null>(null),[list,setList]=useState<Summary[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState(""),[truncated,setTruncated]=useState(false);
  useEffect(()=>{let cancelled=false;void (async()=>{try{const response=await fetch("/api/admin/provisioning/client",{headers:{authorization:"Bearer "+await user.getIdToken()},cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.error||"No se pudieron consultar los expedientes");if(!cancelled){setList(data.intakes);setTruncated(data.truncated)}}catch(e){if(!cancelled)setError((e as Error).message)}})();return()=>{cancelled=true}},[user]);
- function change(k:keyof Profile,v:string){setDraft(d=>({...d,[k]:v}));setRecord(null);setMessage("");setError("")}
+ function change(k:Exclude<keyof Profile,"mode">,v:string){setDraft(d=>({...d,[k]:v}));setRecord(null);setMessage("");setError("")}
  async function run(mode:"save"|"open",tenantId?:string){
   setBusy(true);setError("");setMessage("");setRecord(null);
   try{
@@ -24,7 +24,9 @@ export default function ClientProvisioning({user,apps}:{user:User;apps:{id:strin
  {list.length>0&&<div><p className="caption">Retomar expediente existente</p>{list.map(x=><button key={x.tenantId} type="button" className="btn secondary" disabled={busy} onClick={()=>void run("open",x.tenantId)} style={{margin:4,maxWidth:"100%",overflowWrap:"anywhere"}}>{x.tenantId} · {x.appId}</button>)}</div>}
  {truncated&&<p className="caption">Listado limitado; consulta un expediente por su ID.</p>}
  <form onSubmit={e=>{e.preventDefault();void run("save")}}><div className="stack" style={{maxWidth:620,minWidth:0}}>
- <label className="field">ID de cliente<input required maxLength={39} disabled={busy} value={draft.tenantId} onChange={e=>change("tenantId",e.target.value)} placeholder="Identificador único en minúsculas"/></label>
+ <label className="field">Tipo de expediente<select disabled={busy} value={draft.mode||"new"} onChange={e=>{setDraft({...blank,...(e.target.value==="existing"?{mode:"existing" as const}:{})});setRecord(null);setMessage("");setError("")}}><option value="new">Empresa nueva</option><option value="existing">Cliente existente</option></select></label>
+ {draft.mode==="existing"?<label className="field">Cliente registrado<select required disabled={busy} value={draft.tenantId} onChange={e=>{setDraft({...blank,mode:"existing",tenantId:e.target.value});setRecord(null);setMessage("");setError("")}}><option value="">Seleccionar cliente</option>{tenants.filter(t=>t.status==="active").map(t=><option key={t.id} value={t.id}>{t.name||t.id} ({t.id})</option>)}</select></label>:<label className="field">ID de cliente<input required maxLength={39} disabled={busy} value={draft.tenantId} onChange={e=>change("tenantId",e.target.value)} placeholder="Identificador único en minúsculas"/></label>}
+ {draft.mode==="existing"&&<p className="notice">Se conserva el ID exacto del catálogo. Confirma la razón social y el contacto con documentación real. No se crea otro cliente ni se concede acceso.</p>}
  <button type="button" className="btn secondary" disabled={busy||!draft.tenantId} onClick={()=>void run("open",draft.tenantId)}>Recuperar por ID</button>
  <label className="field">Razón social<input required maxLength={120} disabled={busy} value={draft.legalName} onChange={e=>change("legalName",e.target.value)}/></label>
  <label className="field">Identificación jurídica<input required maxLength={120} disabled={busy} value={draft.legalIdentifier} onChange={e=>change("legalIdentifier",e.target.value)} placeholder="Según documento oficial"/></label>
@@ -35,6 +37,6 @@ export default function ClientProvisioning({user,apps}:{user:User;apps:{id:strin
  <button type="button" className="btn secondary" disabled={busy} onClick={()=>{setDraft(blank);setRecord(null);setMessage("");setError("")}}>Nuevo expediente</button>
  </div></form>
  {error&&<p className="error" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
- {record&&<div style={{overflowWrap:"anywhere",marginTop:16}}><h3 className="subheading">Siguientes requisitos</h3><p>Hostname candidato: {record.hostname}</p><p className="caption">Commit registrado: {record.requirements.sourceCommit}</p><p>Recursos requeridos: {record.requirements.requiredResources.join(", ")||"Ninguno declarado"}</p><p>Configuración a descubrir: {record.requirements.derivedFirebaseKeys.join(", ")||"No declarada"}</p><p>Recursos condicionales (no crear automáticamente): {record.requirements.conditionalResources.join(", ")||"Ninguno"}</p>{record.requirements.steps.map(s=><div className="item" key={s.id}><div><b>{s.instruction}</b><div className="caption">{s.owner} · Pendiente</div></div></div>)}<p className="caption">No autorizado técnicamente ni comercialmente.</p></div>}
+ {record&&<div style={{overflowWrap:"anywhere",marginTop:16}}><h3 className="subheading">Siguientes requisitos</h3>{record.catalogTenantReused&&<p className="notice">Cliente existente reutilizado: {record.tenantId}</p>}<p>Hostname candidato: {record.hostname||"Pendiente de conciliación explícita"}</p><p className="caption">Commit registrado: {record.requirements.sourceCommit}</p><p>Recursos requeridos: {record.requirements.requiredResources.join(", ")||"Ninguno declarado"}</p><p>Configuración a descubrir: {record.requirements.derivedFirebaseKeys.join(", ")||"No declarada"}</p><p>Recursos condicionales (no crear automáticamente): {record.requirements.conditionalResources.join(", ")||"Ninguno"}</p>{record.requirements.steps.map(s=><div className="item" key={s.id}><div><b>{s.instruction}</b><div className="caption">{s.owner} · Pendiente</div></div></div>)}<p className="caption">No autorizado técnicamente ni comercialmente.</p></div>}
  </section>
 }
