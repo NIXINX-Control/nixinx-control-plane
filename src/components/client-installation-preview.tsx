@@ -9,6 +9,7 @@ export default function ClientInstallationPreview({user,tenantId,appId}:{user:Us
  let hostname="";try{hostname=canonicalHostname(tenantId,appId)}catch{/* Explicit reconciliation is required. */}
  const [plan,setPlan]=useState<Plan|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
  const durable=tenantId==="HTL" && appId==="initiatives";
+ const [verifiedPlan,setVerifiedPlan]=useState("");
  const [saved,setSaved]=useState<Saved|null>(null);
  useEffect(()=>{
   let current=true;
@@ -21,6 +22,19 @@ export default function ClientInstallationPreview({user,tenantId,appId}:{user:Us
   try{const r=await fetch("/api/admin/provisioning/client/"+(durable?"installation-plan":"plan")+"?tenantId="+encodeURIComponent(tenantId),{method:durable?"POST":"GET",headers:{authorization:"Bearer "+await user.getIdToken()},cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.error||"CLIENT_PLAN_UNAVAILABLE");setPlan(d);if(d.durablePlan)setSaved(d.durablePlan)}catch(e){setError((e as Error).message)}finally{setBusy(false)}
  }
 
+ async function verifyModule(){
+  if(!saved)return;
+  setBusy(true);setError("");
+  try {
+   const response=await fetch("/api/admin/provisioning/client/verify-module?tenantId=HTL",{
+    method:"POST",headers:{authorization:"Bearer "+await user.getIdToken(),"content-type":"application/json"},
+    body:JSON.stringify({planId:saved.planId})
+   });
+   const result=await response.json();
+   if(!response.ok)throw Error(result.error||"MODULE_VERIFICATION_FAILED");
+   setVerifiedPlan(saved.planId);
+  } catch(e){setError((e as Error).message)} finally{setBusy(false)}
+ }
  async function stage(){
   if(!saved)return;
   setBusy(true);setError("");
@@ -37,6 +51,9 @@ export default function ClientInstallationPreview({user,tenantId,appId}:{user:Us
  {durable&&saved?.version===2&&(saved.stagedAt
  ? <p role="status">Configuración de instalación guardada · {saved.stagedAt} · acceso inactivo.</p>
  : <div><p className="caption">Guarda la configuración de HTL en Control. El dominio y la activación quedan pendientes.</p><button type="button" className="btn secondary" disabled={busy} onClick={()=>void stage()}>Preparar instalación inactiva</button></div>)}
+ {durable&&saved?.stagedAt&&(verifiedPlan===saved.planId
+  ? <p role="status">Módulo Iniciativas verificado para licencias.</p>
+  : <button className="btn secondary" disabled={busy} onClick={()=>void verifyModule()}>Verificar módulo Iniciativas para licencias</button>)}
  {error&&<p role="alert" className="error">{error}</p>}
  {plan&&<div><p className="notice" role="status">Comprobaciones previas · escrituras en proveedores: {plan.writes}</p>{plan.providerEvidence?.releaseVerified&&<p className="caption">Release registrado verificado. Routing: alcance visible del equipo Vercel; DNS consultado por proveedor cuando disponible; asignación y control global no certificados.</p>}{plan.steps.map(s=><div className="item" key={s.resource}><div><b>{labels[s.resource]||s.resource} · {s.status}</b><div className="caption">{s.reason} · {s.owner}</div>{s.evidence&&<div className="caption">Evidencia: {s.evidence}</div>}</div></div>)}<p className="caption">REUSE indica evidencia histórica conciliada, no acceso fresco ni autorización operativa. Titular/pagador: verificar con documentación y <a href="https://console.cloud.google.com/billing" target="_blank" rel="noreferrer">Cloud Billing</a>. Hostname, seguridad y APPLY pendientes.</p></div>}
  </section>
