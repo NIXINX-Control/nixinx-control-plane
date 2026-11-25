@@ -44,3 +44,10 @@ export function decideHostnameDraft(identity:HostnameIdentity,prior:unknown,othe
  if(prior!==undefined&&prior!==null){if(!matchesHostnameDraft(prior,identity))throw Error("HOSTNAME_BINDING_IMMUTABLE");return "REUSE" as const}
  return "CREATE" as const;
 }
+
+// Read-only plan evidence; registration is deferred to authorized installation.
+export function inspectCanonicalHostname(identity:HostnameIdentity,prior:unknown,others:{id:string;data:Obj}[],occupied:boolean,registered:boolean){
+ if(identity.hostname!==canonicalHostname(identity.tenantId,identity.appId))throw Error("HOSTNAME_NOT_CANONICAL");
+ const action=decideHostnameDraft(identity,prior,others,occupied);
+ return {hostname:identity.hostname,reason:registered&&action==="REUSE"?"CANONICAL_HOSTNAME_REGISTERED_ROUTING_PENDING":registered?"CANONICAL_DNS_REUSED_BINDING_PENDING_APPLY":"CANONICAL_HOSTNAME_VALIDATED_REGISTRATION_PENDING_APPLY"};
+}
