@@ -38,7 +38,9 @@ export function tokenRequest(repository?:string){
 }
 export function parseInstallationToken(v:unknown,now=Date.now()){
  const b=v as {token?:string;expires_at?:string;permissions?:Record<string,string>}|null;
- if(!b||typeof b.token!=="string"||!/^ghs_[A-Za-z0-9_]+$/.test(b.token)||b.token.length>4096||typeof b.expires_at!=="string")throw new Error("GITHUB_INSTALLATION_TOKEN_UNVERIFIED");
+ if(!b||typeof b.token!=="string"||b.token.length===0||! /^[\x21-\x7e]+$/.test(b.token)||typeof b.expires_at!=="string")throw new Error("GITHUB_INSTALLATION_TOKEN_UNVERIFIED");
+ // Installation tokens are opaque; GitHub rolled out stateless ghs_APPID_JWT in 2026.
+ // Validate transport safety, expiry and permissions, not the provider token syntax.
  const expiresAt=Date.parse(b.expires_at);
  if(!Number.isFinite(expiresAt)||expiresAt<=now+60000||expiresAt>now+3900000)throw new Error("GITHUB_INSTALLATION_TOKEN_EXPIRY_INVALID");
  if(b.permissions?.contents!=="read"||b.permissions?.metadata!=="read"||Object.entries(b.permissions).some(([k,p])=>!["contents","metadata"].includes(k)&&p!=="read"))throw new Error("GITHUB_INSTALLATION_TOKEN_SCOPE_MISMATCH");
