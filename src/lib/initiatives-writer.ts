@@ -1,7 +1,7 @@
 import "server-only";
 
 const project = "hottacosleamingtonwebapp";
-const uid = "nixinx-htl-initiatives-writer-v1";
+const uid = "G7OuMNB6vlQrzbhq0gavMJeWOu12";
 const email = "initiatives-writer@htl.nixinx.invalid";
 const document = "https://firestore.googleapis.com/v1/projects/" + project +
   "/databases/(default)/documents/nixinx_entitlements/initiatives";
