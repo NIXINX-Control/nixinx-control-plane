@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { projectInitiativesDecision } from "@/lib/initiatives-writer";
 import { db } from "@/lib/server";
 import { accessDecision, suspensionEffective, tenantTimeZone, type License } from "@/lib/lifecycle";
 import { parseConfiguration } from "@/lib/tenant-configuration";
@@ -40,30 +41,47 @@ export async function POST(request: Request) {
         ["appInstallations", hostname], ["configurations", hostname], ["clientProvisioning", tenantId],
         ["tenants", tenantId], ["apps", appId], ["licenses", tenantId + "_" + appId],
       ].map(([collection, id]) => db.collection(collection).doc(id));
-      const [installation, config, intake, tenant, app, license] =
-        (await tx.getAll(...refs)).map(s => s.data());
-      if (!installation || !config || !intake || !tenant || !app || !license) return denied;
-      const now = new Date();
-      if (tenant.status !== "active" || app.status !== "active" || tenant.servicesTerminatedAt ||
-          suspensionEffective(tenant.servicesSuspensionAt, now)) return denied;
+      const snapshots = await tx.getAll(...refs);
+      const [installation, config, intake, tenant, app, license] = snapshots.map(s => s.data());
+      if (!installation || !config || !intake || !tenant || !app) return null;
+      const now = snapshots[0].readTime.toDate();
       if (installation.hostname !== hostname || installation.appId !== appId ||
           installation.tenantId !== tenantId || installation.environment !== "production" ||
           installation.verified !== true || installation.status !== "active" ||
           installation.accessMode !== "individual" || installation.dataAuthorizationVerified !== true ||
           config.status !== "active" || config.hostname !== hostname || config.tenantId !== tenantId ||
-          config.appId !== appId || intake.tenantId !== tenantId || intake.appId !== appId) return denied;
+          config.appId !== appId || intake.tenantId !== tenantId || intake.appId !== appId) return null;
       const binding = restoreClientGoogleBinding(intake.googleBinding, tenantId, appId);
       const { firebase } = parseConfiguration({ hostname, appId, tenantId: tenantId.toLowerCase(), firebase: config.firebase });
       if (installation.firebaseProjectId !== binding.projectId || firebase.projectId !== binding.projectId ||
-          firebase.appId !== binding.webAppId || firebase.messagingSenderId !== binding.projectNumber) return denied;
+          firebase.appId !== binding.webAppId || firebase.messagingSenderId !== binding.projectNumber) return null;
       const owner = (await tx.get(db.collection("firebaseProjectOwners").doc(binding.projectId))).data();
-      if (owner?.tenantId !== tenantId || owner?.projectId !== binding.projectId) return denied;
-      if (license.tenantId !== tenantId || license.appId !== appId || !Array.isArray(license.modules) ||
-          !["active", "trial", "grace"].includes(license.status)) return denied;
-      const permits = (moduleId: string) => accessDecision(license as License, now, moduleId, tenantTimeZone(tenant.timeZone)).allowed;
-      if (!permits("initiatives")) return denied;
-      return { allowed: true, hostname, tenantId, appId, firebase, kpis: permits("kpis") };
+      if (owner?.tenantId !== tenantId || owner?.projectId !== binding.projectId) return null;
+      if (binding.projectId !== "hottacosleamingtonwebapp") return null;
+      const timeZone = tenantTimeZone(tenant.timeZone);
+      function permits(at: Date, moduleId: string) {
+        return tenant?.status === "active" && app?.status === "active" && !tenant.servicesTerminatedAt &&
+          !suspensionEffective(tenant.servicesSuspensionAt, at) &&
+          license?.tenantId === tenantId && license.appId === appId && Array.isArray(license.modules) &&
+          ["active", "trial", "grace"].includes(license.status) &&
+          accessDecision(license as License, at, moduleId, timeZone).allowed;
+      }
+      const allowed = permits(now, "initiatives");
+      // Shorten the lease at a scheduled suspension or effective license expiry.
+      let low = now.getTime(), high = low + 30000;
+      if (allowed && !permits(new Date(high), "initiatives")) {
+        while (high - low > 1) {
+          const mid = low + Math.floor((high - low) / 2);
+          if (permits(new Date(mid), "initiatives")) low = mid;
+          else high = mid;
+        }
+      }
+      const validUntil = allowed ? new Date(high) : now;
+      return { allowed, firebase, now, validUntil, kpis: allowed && permits(now, "kpis") };
     }, { readOnly: true });
-    return reply(result, result.allowed ? 200 : 403);
+    if (!result) return reply(denied, 403);
+    await projectInitiativesDecision(result.firebase.apiKey, result.allowed, result.now, result.validUntil);
+    if (!result.allowed || result.validUntil.getTime() <= Date.now()) return reply(denied, 403);
+    return reply({ allowed: true, hostname, tenantId, appId, firebase: result.firebase, kpis: result.kpis });
   } catch { return reply(denied, 503); }
 }
