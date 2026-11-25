@@ -1,0 +1,23 @@
+"use client";
+import {useState,useEffect} from "react";
+import type {User} from "firebase/auth";
+type Binding={mode:"corporate"|"client";projectId:string;projectNumber:string;organizationId:string;webAppId:string};
+type Inventory={projectId:string;webAppCount:number;billingEnabled:boolean;billingAccountLinked:boolean;enabledServices:string[];databases:{name:string;type:string;locationId:string}[];verifiedAt:string};
+const empty:Binding={mode:"client",projectId:"",projectNumber:"",organizationId:"",webAppId:""};
+export default function ClientGoogleDiscovery({user,tenantId,appId}:{user:User;tenantId:string;appId:string}){
+ const [draft,setDraft]=useState<Binding>(empty),[bound,setBound]=useState(false),[consent,setConsent]=useState(false),[loaded,setLoaded]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState(""),[inventory,setInventory]=useState<Inventory|null>(null);
+ useEffect(()=>{let cancelled=false;void(async()=>{try{const r=await fetch("/api/admin/provisioning/client/google?tenantId="+encodeURIComponent(tenantId),{headers:{authorization:"Bearer "+await user.getIdToken()},cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.error||"GOOGLE_DISCOVERY_UNVERIFIED");if(!cancelled){if(d.binding){const {mode,projectId,projectNumber,organizationId,webAppId}=d.binding;setDraft({mode,projectId,projectNumber,organizationId,webAppId});setBound(true)}setInventory(d.inventory);setLoaded(true)}}catch(e){if(!cancelled)setError((e as Error).message)}})();return()=>{cancelled=true}},[user,tenantId]);
+ async function run(action:"bind"|"discover"){
+  setBusy(true);setError("");setMessage("");if(action==="discover")setInventory(null);
+  try{const r=await fetch("/api/admin/provisioning/client/google",{method:"POST",headers:{authorization:"Bearer "+await user.getIdToken(),"content-type":"application/json"},body:JSON.stringify(action==="bind"?{action,tenantId,binding:draft,ownerAuthorized:consent}:{action,tenantId}),cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.error||"GOOGLE_DISCOVERY_UNVERIFIED");if(action==="bind"){setBound(true);setMessage("Vinculación autorizada guardada. Acceso efectivo pendiente.")}else{setInventory(d.inventory);setMessage("Descubrimiento Google de metadata verificado.")}}catch(e){setError((e as Error).message)}finally{setBusy(false)}
+ }
+ return <section style={{marginTop:20}}><h3 className="subheading">Delegación Google · {tenantId} / {appId}</h3><p className="caption">Solo metadata. No genera recursos ni autoriza datos. La vinculación es inmutable en este incremento; discrepancias requieren conciliación.</p>
+ <form onSubmit={e=>{e.preventDefault();void run("bind")}}><div className="stack" style={{maxWidth:620,minWidth:0}}>
+ <label className="field">Modalidad WIF<select value={draft.mode} disabled={!loaded||bound||busy} onChange={e=>setDraft(d=>({...d,mode:e.target.value as Binding["mode"]}))}><option value="client">Client-owned WIF</option><option value="corporate">Corporate-owned WIF</option></select></label>
+ {(["projectId","projectNumber","organizationId","webAppId"] as const).map(k=><label className="field" key={k}>{k}<input required maxLength={120} disabled={!loaded||bound||busy} value={draft[k]} onChange={e=>setDraft(d=>({...d,[k]:e.target.value}))}/></label>)}
+ {!bound&&<><label className="field" style={{display:"flex",alignItems:"center"}}><input type="checkbox" checked={consent} disabled={!loaded||busy} onChange={e=>setConsent(e.target.checked)}/> Confirmo autorización del titular y delegación IAM del proyecto indicado.</label><button type="submit" className="btn" disabled={!loaded||busy||!consent}>Guardar vinculación autorizada</button></>}
+ </div></form>
+ {bound&&<button type="button" className="btn secondary" disabled={busy} onClick={()=>void run("discover")}>{busy?"Consultando…":"Descubrir infraestructura Google"}</button>}
+ {error&&<p className="error" role="alert">{error}</p>}{message&&<p className="notice" role="status">{message}</p>}
+ {inventory&&<div style={{overflowWrap:"anywhere"}}><p><b>Último inventario verificado:</b> {inventory.verifiedAt}</p><p>Proyecto: {inventory.projectId} · Web Apps: {inventory.webAppCount}</p><p>Facturación habilitada: {inventory.billingEnabled?"Sí":"No"} · vinculada: {inventory.billingAccountLinked?"Sí":"No"}</p><p>APIs: {inventory.enabledServices.join(", ")}</p><p>Bases: {inventory.databases.map(d=>d.name+" / "+d.type+" / "+d.locationId).join("; ")||"Ninguna"}</p><p className="caption">No acredita autorización de documentos, usuarios, instalación ni activación comercial.</p></div>}</section>
+}
