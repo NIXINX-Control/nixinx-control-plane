@@ -30,8 +30,9 @@ export async function stagedInitiativesRelease(registeredCommit:string, register
   ]);
   const sha = (deployment:{gitSource?:{sha?:string};meta?:{githubCommitSha?:string}}) =>
     deployment.gitSource?.sha ?? deployment.meta?.githubCommitSha;
+  const alreadyAssigned = routing.reason === "EXISTING_EXPECTED_PROJECT_REVIEW_REQUIRED";
   if(live.id!==registeredDeployment || live.projectId!==project || sha(live)!==registeredCommit ||
-     routing.reason!=="NOT_ASSIGNED_IN_VISIBLE_TEAM_APEX" ||
+     (!alreadyAssigned && routing.reason!=="NOT_ASSIGNED_IN_VISIBLE_TEAM_APEX") ||
      routing.dns?.reason!=="DNS_PROVIDER_CONFIG_NO_REPORTED_CONFLICT_ASSIGNMENT_PENDING") throw Error("STAGED_ROUTING_MISMATCH");
   const match = list.deployments?.find((d:{uid?:string;meta?:{githubCommitSha?:string}})=>d.meta?.githubCommitSha===product.sourceCommit);
   if(!match || !/^dpl_[a-zA-Z0-9]+$/.test(match.uid)) throw Error("STAGED_DEPLOYMENT_MISSING");
@@ -39,6 +40,13 @@ export async function stagedInitiativesRelease(registeredCommit:string, register
   if(deployment.id!==match.uid || deployment.projectId!==project || deployment.target!=="production" ||
      deployment.readyState!=="READY" || sha(deployment)!==product.sourceCommit ||
      deployment.meta?.githubCommitRef!=="main" || deployment.id===live.id) throw Error("STAGED_DEPLOYMENT_MISMATCH");
+  if (alreadyAssigned) {
+    const assigned = await read("v13/deployments/" + hostname);
+    if (assigned.id !== deployment.id || assigned.projectId !== project || assigned.target !== "production" ||
+        assigned.readyState !== "READY" || sha(assigned) !== product.sourceCommit) {
+      throw Error("STAGED_HOSTNAME_DEPLOYMENT_MISMATCH");
+    }
+  }
   return {repository,vercelProjectId:project,sourceCommit:product.sourceCommit,
     deploymentId:deployment.id as string,previousDeploymentId:registeredDeployment,registeredCommit,
     routing:{...routing,dns:routing.dns},requirements:manifest};
