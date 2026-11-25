@@ -1,5 +1,6 @@
 import {NextRequest} from "next/server";
 import {superadminUser,db,ok,fail,ApiError} from "@/lib/server";
+import {runtimeConfigPreflight} from "@/lib/client-runtime-config-preflight";
 import {clientProviderPreflight} from "@/lib/client-provider-preflight-provider";
 import {existingIdPattern} from "@/lib/client-provisioning";
 import {buildClientInstallationPreview} from "@/lib/client-installation-preview";
@@ -43,12 +44,17 @@ export async function GET(req:NextRequest){
    const plan=buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),hostnameEvidence);
    const r=d.requirements;
    const providerInput=plan.hostname&&typeof plan.sourceCommit==="string"&&typeof r?.repository==="string"&&typeof r?.vercelProjectId==="string"&&typeof r?.deploymentId==="string"?{appId:plan.appId,repository:r.repository,vercelProjectId:r.vercelProjectId,sourceCommit:plan.sourceCommit,deploymentId:r.deploymentId,hostname:plan.hostname}:null;
-   return {plan,providerInput};
+   return {plan,providerInput,runtimeInput:providerInput?{tenantId:id,appId:plan.appId,hostname:providerInput.hostname,binding:d.googleBinding,requirements:r.derivedFirebaseKeys}:null};
   },{readOnly:true});
   const plan=result.plan;
   // Provider network reads outside Firestore transaction. No external mutations or stored attestations.
-  if(result.providerInput){const evidence=await clientProviderPreflight(result.providerInput);const step=plan.steps.find(s=>s.resource==="release");if(step){step.status=evidence.status;step.reason=evidence.reason;step.evidence=evidence.checkedAt;}
-   return ok({...plan,providerEvidence:evidence});}
+  if(result.providerInput&&result.runtimeInput){
+   const [evidence,config]=await Promise.all([clientProviderPreflight(result.providerInput),runtimeConfigPreflight(result.runtimeInput,req.headers.get("x-vercel-oidc-token"),process.env.VERCEL_ENV)]);
+   const step=plan.steps.find(s=>s.resource==="release");if(step){step.status=evidence.status;step.reason=evidence.reason;step.evidence=evidence.checkedAt;}
+   const dns="dns" in evidence?evidence.dns:undefined;
+   if(dns)plan.steps.splice(plan.steps.findIndex(s=>s.resource==="release")+1,0,{resource:"dns",status:dns.status,reason:dns.reason,owner:"NIXINX",evidence:evidence.checkedAt});
+   const configStep=plan.steps.find(s=>s.resource==="configuration");if(configStep){configStep.status=config.status;configStep.reason=config.reason;configStep.evidence=config.checkedAt;}
+   return ok({...plan,providerEvidence:evidence,runtimeConfigEvidence:config});}
   return ok(plan);
  }catch(e){return fail(e)}
 }

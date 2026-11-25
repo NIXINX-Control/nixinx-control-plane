@@ -5,7 +5,7 @@ export function validateSdkRequirements(value:unknown){
  if(!Array.isArray(value)||value.length===0||new Set(value).size!==value.length||value.some(k=>!sdkKeys.some(x=>x===k)))throw Error("FIREBASE_SDK_REQUIREMENTS_INVALID");
  return sdkKeys.filter(k=>value.includes(k));
 }
-export async function verifyFirebaseSdkConfig(b:Binding,requirements:unknown,accessToken:string,request:typeof fetch=fetch){
+export async function readFirebaseSdkConfig(b:Binding,requirements:unknown,accessToken:string,request:typeof fetch=fetch){
  const required=validateSdkRequirements(requirements);
  if(!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(b.projectId)||!/^[0-9]{1,30}$/.test(b.projectNumber)||!/^1:[0-9]+:web:[a-fA-F0-9]+$/.test(b.webAppId)||b.webAppId.split(":")[1]!==b.projectNumber||typeof accessToken!=="string"||!accessToken||/[\r\n]/.test(accessToken))throw Error("FIREBASE_SDK_INPUT_INVALID");
  let res:Response;
@@ -16,5 +16,9 @@ export async function verifyFirebaseSdkConfig(b:Binding,requirements:unknown,acc
  if(data.projectId!==b.projectId||data.appId!==b.webAppId||(data.messagingSenderId!==undefined&&data.messagingSenderId!==b.projectNumber))throw Error("FIREBASE_SDK_BINDING_MISMATCH");
  const valid=(k:string)=>typeof data[k]==="string"&&data[k].length>0&&data[k].length<=2048&&!/[\s\x00-\x1f\x7f]/.test(data[k]);
  if(!["apiKey","projectId","appId",...required].every(valid))throw Error("FIREBASE_SDK_REQUIRED_FIELDS_MISSING");
- return {status:"FIREBASE_SDK_CONFIG_VERIFIED",projectId:b.projectId,webAppId:b.webAppId,verifiedKeys:required,valuesPersisted:false,technicalReady:false,commercialAuthorized:false};
+ const values:Record<string,string>={};for(const key of required)values[key]=data[key];
+ return {evidence:{status:"FIREBASE_SDK_CONFIG_VERIFIED",projectId:b.projectId,webAppId:b.webAppId,verifiedKeys:required,valuesPersisted:false,technicalReady:false,commercialAuthorized:false},values};
 }
+
+// Existing UI and audit contract remains metadata-only.
+export async function verifyFirebaseSdkConfig(b:Binding,requirements:unknown,accessToken:string,request:typeof fetch=fetch){return (await readFirebaseSdkConfig(b,requirements,accessToken,request)).evidence;}

@@ -15,3 +15,9 @@ export function inspectApexRouting(hostname:string,projectId:string,domains:unkn
 export function inspectRegisteredRelease(expected:{sourceCommit:string;deploymentId:string},actual:{sourceCommit:string;release:{sourceCommit:string;deploymentId:string}|null}){
  return actual.sourceCommit===expected.sourceCommit&&actual.release?.sourceCommit===expected.sourceCommit&&actual.release.deploymentId===expected.deploymentId;
 }
+
+export function inspectDnsConfig(value:unknown){
+ if(!obj(value)||typeof value.misconfigured!=="boolean"||!Array.isArray(value.conflicts)||!Array.isArray(value.aValues)||!Array.isArray(value.cnames))throw Error("DNS_CONFIGURATION_RESPONSE_UNVERIFIED");
+ if(value.conflicts.length||value.misconfigured)return {status:"BLOCKED" as const,reason:"DNS_PROVIDER_CONFLICT_OR_MISCONFIGURATION"};
+ return {status:"VERIFY" as const,reason:"DNS_PROVIDER_CONFIG_NO_REPORTED_CONFLICT_ASSIGNMENT_PENDING"};
+}

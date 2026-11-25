@@ -1,7 +1,7 @@
 import "server-only";
 import {getProviderToken,providerTeam} from "@/lib/provider-connections";
 import {discoverProduct} from "@/lib/product-discovery-provider";
-import {inspectApexRouting,inspectRegisteredRelease} from "@/lib/client-provider-preflight";
+import {inspectApexRouting,inspectRegisteredRelease,inspectDnsConfig} from "@/lib/client-provider-preflight";
 export async function clientProviderPreflight(input:{appId:string;repository:string;vercelProjectId:string;sourceCommit:string;deploymentId:string;hostname:string}){
  const at=new Date().toISOString();
  const fail=(reason:string)=>({status:"BLOCKED" as const,reason,checkedAt:at});
@@ -21,7 +21,15 @@ export async function clientProviderPreflight(input:{appId:string;repository:str
    domains.push(...data.projectDomains);
    if(data.pagination.next===null){
     const routing=inspectApexRouting(input.hostname,input.vercelProjectId,domains);
-    return {status:routing==="ROUTING_CONFLICT_REVIEW_REQUIRED"?"BLOCKED" as const:"VERIFY" as const,reason:routing,checkedAt:at,releaseVerified:true,scope:"VISIBLE_TEAM_APEX_ONLY",dnsVerified:false};
+    const base={status:routing==="ROUTING_CONFLICT_REVIEW_REQUIRED"?"BLOCKED" as const:"VERIFY" as const,reason:routing,checkedAt:at,releaseVerified:true,scope:"VISIBLE_TEAM_APEX_ONLY",dnsVerified:false};
+    if(base.status==="BLOCKED")return base;
+    let dns:{status:"VERIFY"|"BLOCKED";reason:string}={status:"BLOCKED",reason:"DNS_PROVIDER_CONFIG_READ_UNAVAILABLE"};
+    try{
+     const params=new URLSearchParams({teamId:team,projectIdOrName:input.vercelProjectId,strict:"true"});
+     const response=await fetch("https://api.vercel.com/v6/domains/"+encodeURIComponent(input.hostname)+"/config?"+params,{headers:{Authorization:"Bearer "+token,Accept:"application/json"},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(7000)});
+     if(response.ok)dns=inspectDnsConfig(await response.json());
+    }catch{/* Preserve release evidence but never infer DNS availability. */}
+    return {...base,dns};
    }
    const next=data.pagination.next;
    if(typeof next!=="number"||!Number.isSafeInteger(next)||seen.has(next))return fail("VERCEL_APEX_PAGINATION_UNVERIFIED");
