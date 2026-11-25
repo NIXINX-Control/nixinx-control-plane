@@ -33,8 +33,10 @@ test("Initiatives requires an authenticated production workload, verified bindin
     "tenants/HTL": { status: "active" }, "apps/initiatives": { status: "active" },
     "licenses/HTL_initiatives": license, ["firebaseProjectOwners/" + projectId]: { projectId, tenantId },
   };
-  const snap = id => ({data: () => records[id]});
+  const snap = id => ({data: () => records[id], readTime: {toDate: () => new Date()}});
+  const writes = [];
   const route = load("app/api/internal/initiatives/runtime/route.ts", {
+    "@/lib/initiatives-writer": { projectInitiativesDecision: async (...args) => { writes.push(args); } },
     jose: { createRemoteJWKSet: () => ({}), jwtVerify: async token => {
       if (token !== "valid") throw Error();
       return { payload: { owner_id: "team_7GCW65202sW0sdYEgH3LDeFE", project_id: "prj_6NzsF9pc0Z6BNtY8yHzSjAUnAkYV" } };
@@ -55,6 +57,8 @@ test("Initiatives requires an authenticated production workload, verified bindin
     assert.equal((await call("htw.initiatives.nixinx.app")).status, 400);
     const ok = await (await call()).json();
     assert.equal(ok.allowed, true);
+    assert.equal(writes.at(-1)[1], true);
+    assert.ok(writes.at(-1)[3] - writes.at(-1)[2] <= 30000);
     assert.equal(ok.kpis, false);
     assert.deepEqual(ok.firebase, firebase);
     for (const [record, key, value] of [
@@ -68,6 +72,7 @@ test("Initiatives requires an authenticated production workload, verified bindin
       try {
         const denied = await call();
         assert.equal(denied.status, 403, key);
+        if (record === license || key === "servicesTerminatedAt") assert.equal(writes.at(-1)[1], false);
         assert.deepEqual(await denied.json(), { allowed: false }, key);
       } finally { record[key] = original; }
     }
