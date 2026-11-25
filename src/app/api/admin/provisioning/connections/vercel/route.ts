@@ -1,7 +1,7 @@
 import {NextRequest} from "next/server";
 import {superadminUser,ok,fail,ApiError} from "@/lib/server";
-import {parseVercelRoot} from "@/lib/vercel-integration-policy";
-import {saveVercelRoot,startVercelAuthorization} from "@/lib/vercel-integration-provider";
+import {parseVercelRoot,parsePrivateReceipt} from "@/lib/vercel-integration-policy";
+import {saveVercelRoot,startVercelAuthorization,finishVercelAuthorization} from "@/lib/vercel-integration-provider";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export async function POST(req:NextRequest){
@@ -16,6 +16,16 @@ export async function POST(req:NextRequest){
    try{start=await startVercelAuthorization(actor)}catch{throw new ApiError(409,"VERCEL_AUTHORIZATION_START_UNVERIFIED")}
    const res=ok({url:start.url});
    res.headers.set("Set-Cookie","nx_vercel_state="+start.state+"; Path=/api/integrations/vercel/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=900");
+   return res;
+  }
+  if(body?.action==="confirmPrivate"&&Object.keys(body).length===1){
+   const rawReceipt=req.cookies.get("nx_vercel_private_receipt")?.value;
+   if(!rawReceipt||rawReceipt.length>3900)throw new ApiError(409,"VERCEL_PRIVATE_CALLBACK_PENDING");
+   let input;
+   try{input=parsePrivateReceipt(JSON.parse(Buffer.from(rawReceipt,"base64url").toString("utf8")))}catch{throw new ApiError(400,"VERCEL_CALLBACK_INVALID")}
+   try{await finishVercelAuthorization(input,actor)}catch(e){throw new ApiError(409,e instanceof Error&&/^[A-Z][A-Z0-9_]{1,80}$/.test(e.message)?e.message:"VERCEL_INTEGRATION_UNVERIFIED")}
+   const res=ok({next:input.next});
+   res.headers.set("Set-Cookie","nx_vercel_private_receipt=; Path=/api/admin/provisioning/connections/vercel; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
    return res;
   }
   if(body?.action!=="saveRoot"||Object.keys(body).some(k=>!["action","clientId","clientSecret"].includes(k)))throw new ApiError(400,"INVALID_INPUT");
