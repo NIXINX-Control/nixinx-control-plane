@@ -2,7 +2,7 @@ import "server-only";
 import {createHash,randomBytes} from "node:crypto";
 import {db} from "@/lib/server";
 import {readVercelRoot,writeVercelRoot,ProviderConnectionError} from "@/lib/control-secret-vault";
-import {parseVercelRoot,installationId,verifyExchange,parseShortToken,corporateTeam,vercelCallback,vercelSlug,type VercelRoot} from "@/lib/vercel-integration-policy";
+import {parseVercelRoot,installationId,verifyExchange,parseShortToken,corporateTeam,vercelCallback,privateInstallUrl,type VercelRoot} from "@/lib/vercel-integration-policy";
 const config=()=>db.collection("providerConnections").doc("vercel");
 const states=()=>db.collection("providerAuthorizationStates");
 const digest=(v:string)=>createHash("sha256").update(v).digest("hex");
@@ -87,16 +87,14 @@ export async function startVercelAuthorization(actor:string){
  const existing=(await config().get()).data();
  if(existing?.installationId)throw new ProviderConnectionError("VERCEL_INSTALLATION_ALREADY_BOUND");
  await states().doc(digest(state)).create({actor,rootFingerprint:fingerprint(root),teamId:corporateTeam,status:"PENDING",expiresAt:Date.now()+15*60000,createdAt:new Date().toISOString()});
- const url=new URL("https://vercel.com/integrations/"+vercelSlug+"/new");
- url.searchParams.set("state",state);
- return {state,url:url.href};
+ return {state,url:privateInstallUrl};
 }
-export async function finishVercelAuthorization(input:{state:string;code:string;id:string}){
+export async function finishVercelAuthorization(input:{state:string;code:string;id:string},confirmedActor?:string){
  const ref=states().doc(digest(input.state));
  const root=await storedRoot();
  const actor=await db.runTransaction(async tx=>{
   const d=(await tx.get(ref)).data();
-  if(!d||d.status!=="PENDING"||typeof d.actor!=="string"||d.teamId!==expectedTeam()||d.rootFingerprint!==fingerprint(root)||typeof d.expiresAt!=="number"||d.expiresAt<Date.now())throw new ProviderConnectionError("VERCEL_STATE_EXPIRED_OR_USED");
+  if(!d||d.status!=="PENDING"||typeof d.actor!=="string"||(confirmedActor!==undefined&&d.actor!==confirmedActor)||d.teamId!==expectedTeam()||d.rootFingerprint!==fingerprint(root)||typeof d.expiresAt!=="number"||d.expiresAt<Date.now())throw new ProviderConnectionError("VERCEL_STATE_EXPIRED_OR_USED");
   tx.update(ref,{status:"CONSUMED",consumedAt:new Date().toISOString()});
   return d.actor as string;
  });
@@ -105,7 +103,7 @@ export async function finishVercelAuthorization(input:{state:string;code:string;
   const exchange=await tokenCall(root,{grant_type:"authorization_code",code:input.code,redirect_uri:vercelCallback});
   const id=verifyExchange(exchange,input.id);
   const t=await issue(root,id);
-  await verifyTeam(t.token);
+  await Promise.all([verifyTeam(t.token),verifyInstallationRead(t.token,id)]);
   // Re-read root before binding; mismatched root fingerprints always fail closed at token use.
   if(fingerprint(await storedRoot())!==fingerprint(root))throw new ProviderConnectionError("VERCEL_ROOT_CHANGED");
   await db.runTransaction(async tx=>{

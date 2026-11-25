@@ -26,3 +26,14 @@ test("exchange and short token must match trusted installation and team",()=>{
  assert.throws(()=>p.parseShortToken({...b,expires_in:999999},id,now));
  assert.throws(()=>p.parseShortToken({...b,scope:""},id,now));
 });
+
+test("private dashboard callback never accepts wrong team or ambiguous parameters",()=>{
+ const q=new URLSearchParams({code:"synthetic-code",teamId:team,configurationId:id,source:"marketplace",next:"https://vercel.com/dashboard"});
+ assert.equal(p.privateInstallUrl,"https://vercel.com/nixinx-projects/~/integrations/nixinx-control-provisioning");
+ const input=p.parsePrivateCallback(q);
+ assert.equal(p.parsePrivateReceipt({...input,state}).id,id);
+ assert.throws(()=>p.parsePrivateReceipt({...input,state:"invalid"}));
+ q.set("teamId","other");assert.throws(()=>p.parsePrivateCallback(q));
+ q.set("teamId",team);q.append("code","duplicate");assert.throws(()=>p.parsePrivateCallback(q));
+ assert.equal(p.parsePrivateReceipt({...input,state,next:"https://evil.example"}).next,"https://controlde.nixinx.org/");
+});

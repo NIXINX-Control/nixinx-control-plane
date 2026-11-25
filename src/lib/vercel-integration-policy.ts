@@ -34,3 +34,17 @@ export function parseCallback(q:URLSearchParams){
  if(!code||code.length>2048||! /^[\x21-\x7e]+$/.test(code)||!state||! /^[a-f0-9]{64}$/.test(state)||!installationId(id)||q.get("source")!=="external"||q.get("teamId")!==corporateTeam)throw new Error("VERCEL_CALLBACK_INVALID");
  return {code,state,id,next:safeNext(q.get("next"))};
 }
+
+// Private installations are initiated through the owning team's dashboard.
+export const privateInstallUrl="https://vercel.com/nixinx-projects/~/integrations/nixinx-control-provisioning";
+export function parsePrivateCallback(q:URLSearchParams){
+ for(const k of ["code","state","teamId","configurationId","next","source"])if(q.getAll(k).length>1)throw new Error("VERCEL_CALLBACK_INVALID");
+ const code=q.get("code"),id=q.get("configurationId");
+ if(!code||code.length>2048||! /^[\x21-\x7e]+$/.test(code)||!installationId(id)||q.get("source")!=="marketplace"||q.get("teamId")!==corporateTeam)throw new Error("VERCEL_CALLBACK_INVALID");
+ return {code,id,next:safeNext(q.get("next"))};
+}
+export function parsePrivateReceipt(v:unknown){
+ const b=v as {state?:string;code?:string;id?:string;next?:string}|null;
+ if(!b||typeof b.state!=="string"||! /^[a-f0-9]{64}$/.test(b.state)||typeof b.code!=="string"||!b.code||b.code.length>2048||! /^[\x21-\x7e]+$/.test(b.code)||!installationId(b.id)||typeof b.next!=="string")throw new Error("VERCEL_CALLBACK_INVALID");
+ return {state:b.state,code:b.code,id:b.id,next:safeNext(b.next)};
+}
