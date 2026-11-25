@@ -1,0 +1,12 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
+const source=fs.readFileSync(new URL("../src/lib/client-provisioning.ts",import.meta.url),"utf8");
+const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const {parseIntake,legalKey,decideIntake,buildIntakeRequirements}=await import("data:text/javascript;base64,"+Buffer.from(js).toString("base64"));
+const input={tenantId:"example-a",appId:"initiatives",legalName:"Synthetic company",legalIdentifier:"TEST-1",jurisdiction:"Example",contactEmail:"operator@example.invalid"};
+test("preliminary intake exact input only",()=>{assert.deepEqual(parseIntake(input),input);for(const x of [{...input,token:"secret"},{...input,tenantId:"../x"},{...input,contactEmail:"bad"},{...input,legalIdentifier:""},null])assert.throws(()=>parseIntake(x));});
+test("exact replay reuses and rejects conflicting profile",()=>{assert.equal(decideIntake(input,undefined,[],[]),"CREATE");const prior={tenantId:input.tenantId,profile:input};assert.equal(decideIntake(input,prior,[],[]),"REUSE");assert.throws(()=>decideIntake({...input,appId:"supply"},prior,[],[]),/INTAKE_CONFLICT/);});
+test("existing catalog and legal identity draft conflicts fail closed",()=>{assert.throws(()=>decideIntake(input,undefined,["EXAMPLE-A"],[]),/EXISTING_TENANT/);assert.throws(()=>decideIntake(input,undefined,[],[legalKey({...input,jurisdiction:"example",legalIdentifier:"test-1"})]),/LEGAL_IDENTITY/);});
+test("manifest driven resources are pending and conditional not required",()=>{const b={sourceCommit:"a".repeat(40),repository:"NIXINX-Software/initiatives-portal",vercelProjectId:"prj_12345678",deploymentId:"dpl_12345678"};const m={applicationId:"initiatives",requirements:{hosting:"vercel-shared",dataPlane:["firebase-auth","firestore"],firebaseWebConfigKeys:["projectId"],conditionalResources:["cloud-run"]}};const p=buildIntakeRequirements("initiatives",b,m);assert.deepEqual(p.requiredResources,["firebase-auth","firestore"]);assert.deepEqual(p.conditionalResources,["cloud-run"]);assert.ok(p.steps.every(s=>s.status==="PENDING"));assert.throws(()=>buildIntakeRequirements("supply",b,m));assert.throws(()=>buildIntakeRequirements("initiatives",{},m));});
