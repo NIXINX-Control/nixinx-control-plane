@@ -8,6 +8,12 @@ export async function clientProviderPreflight(input:{appId:string;repository:str
  let release;
  try{release=await discoverProduct({appId:input.appId,repository:input.repository,vercelProjectId:input.vercelProjectId})}catch{return fail("FRESH_PRODUCT_PROVIDER_READ_UNAVAILABLE")}
  if(!inspectRegisteredRelease(input,release))return fail("REGISTERED_PRODUCTION_RELEASE_CHANGED_OR_NOT_READY");
+ return readRoutingEvidence(input);
+}
+
+export async function readRoutingEvidence(input:{vercelProjectId:string;hostname:string}){
+ const at=new Date().toISOString();
+ const fail=(reason:string)=>({status:"BLOCKED" as const,reason,checkedAt:at});
  try{
   const token=await getProviderToken("vercel"),team=providerTeam(),domains:unknown[]=[];
   let cursor:number|undefined;
