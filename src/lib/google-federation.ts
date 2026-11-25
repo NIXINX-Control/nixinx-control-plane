@@ -21,12 +21,13 @@ export function assertProductionOidc(token:string|null,environment:string|undefi
  if(!Number.isInteger(c.exp)||!Number.isInteger(c.nbf)||!Number.isInteger(c.iat)||c.exp<=t||c.nbf>t+30||c.iat>t+30||c.exp<=c.iat)throw new FederationError("VERCEL_OIDC_TIME_INVALID");
  return token;
 }
-export async function exchangeGoogleFederation(token:string|null,environment:string|undefined,request:typeof fetch=fetch){
+export async function exchangeGoogleFederation(token:string|null,environment:string|undefined,request:typeof fetch=fetch,provider=googleFederationBinding.provider as string){
+ if(provider!==googleFederationBinding.provider&&!/^\/\/iam\.googleapis\.com\/projects\/[0-9]{1,30}\/locations\/global\/workloadIdentityPools\/nixinx-control-delegation\/providers\/vercel-control-prod$/.test(provider))throw new FederationError("GOOGLE_PROVIDER_INVALID");
  const subjectToken=assertProductionOidc(token,environment);
  let res:Response;
  try{res=await request("https://sts.googleapis.com/v1/token",{
  method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(10000),
- body:JSON.stringify({grantType:"urn:ietf:params:oauth:grant-type:token-exchange",audience:googleFederationBinding.provider,scope:"https://www.googleapis.com/auth/cloud-platform",requestedTokenType:"urn:ietf:params:oauth:token-type:access_token",subjectTokenType:"urn:ietf:params:oauth:token-type:jwt",subjectToken})
+ body:JSON.stringify({grantType:"urn:ietf:params:oauth:grant-type:token-exchange",audience:provider,scope:"https://www.googleapis.com/auth/cloud-platform",requestedTokenType:"urn:ietf:params:oauth:token-type:access_token",subjectTokenType:"urn:ietf:params:oauth:token-type:jwt",subjectToken})
  })}catch{throw new FederationError("GOOGLE_STS_UNAVAILABLE")}
  if(!res.ok){
   let code="";try{code=(await res.json()).error}catch{}
