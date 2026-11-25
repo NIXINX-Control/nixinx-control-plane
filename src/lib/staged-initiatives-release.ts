@@ -41,5 +41,5 @@ export async function stagedInitiativesRelease(registeredCommit:string, register
      deployment.meta?.githubCommitRef!=="main" || deployment.id===live.id) throw Error("STAGED_DEPLOYMENT_MISMATCH");
   return {repository,vercelProjectId:project,sourceCommit:product.sourceCommit,
     deploymentId:deployment.id as string,previousDeploymentId:registeredDeployment,registeredCommit,
-    routing,requirements:manifest};
+    routing:{...routing,dns:routing.dns},requirements:manifest};
 }
