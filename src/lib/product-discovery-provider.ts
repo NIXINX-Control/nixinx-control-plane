@@ -12,7 +12,7 @@ export async function discoverProduct(input:ProductDiscoveryInput){
  // credentials or arbitrary URLs from a caller, or fall back to another team.
  input=parseProductDiscoveryInput(input);
  let github:string,vercel:string,team:string;
- try{team=providerTeam();[github,vercel]=await Promise.all([getProviderToken("github"),getProviderToken("vercel")])}catch{throw new DiscoveryUnavailable("PROVIDER_CREDENTIALS_NOT_CONFIGURED_OR_UNAVAILABLE")}
+ try{team=providerTeam();[github,vercel]=await Promise.all([getProviderToken("github",input.repository),getProviderToken("vercel")])}catch{throw new DiscoveryUnavailable("PROVIDER_CREDENTIALS_NOT_CONFIGURED_OR_UNAVAILABLE")}
  const base="https://api.github.com/repos/"+input.repository;
  const accept="application/vnd.github+json";
  const [repository,branch,project]=await Promise.all([
