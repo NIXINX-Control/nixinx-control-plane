@@ -1,7 +1,8 @@
 "use client";
 import {useState,useEffect,useCallback,useRef} from "react";
 import type {User} from "firebase/auth";
-type Connection={provider:string;custody:string;status:string;operationPermissionsVerified:boolean;installationId?:number;expiresAt?:string};
+import VercelIntegrationConnection from "@/components/vercel-integration-connection";
+type Connection={provider:string;custody:string;status:string;operationPermissionsVerified:boolean;installationId?:number|string;expiresAt?:string};
 export default function ProviderConnections({user}:{user:User}){
  const [rows,setRows]=useState<Connection[]>([]),[vault,setVault]=useState(false),[open,setOpen]=useState(false),[key,setKey]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
  const input=useRef<HTMLInputElement>(null);
@@ -23,6 +24,6 @@ export default function ProviderConnections({user}:{user:User}){
  {open&&<form style={{marginTop:12,padding:16,border:"1px solid #a6c9be",borderRadius:10}} onSubmit={e=>{e.preventDefault();void save()}}><h3>Clave privada GitHub App</h3><p>En Credentials genera la clave privada PEM e instala la App en NIXINX-Software. Selecciona aquí el archivo descargado. Se verifica la App y su instalación antes de guardar en Secret Manager. No se conserva el archivo en el navegador después de enviar o cancelar.</p>
  <label>Archivo PEM<input ref={input} type="file" accept=".pem" required disabled={busy} style={{display:"block",width:"100%",maxWidth:"100%",marginTop:8}} onChange={async e=>{const f=e.target.files?.[0];setKey("");setError("");if(!f)return;if(f.size>8192){setError("Archivo demasiado grande");return}try{setKey(await f.text())}catch{setError("No se pudo leer el archivo")}}}/></label>
  <button type="submit" className="btn" disabled={busy||!key}>Validar y guardar</button> <button type="button" className="btn secondary" disabled={busy} onClick={()=>{clear();setOpen(false)}}>Cancelar</button></form>}</div>
- <div style={{marginTop:16}}><h3>Vercel Integration</h3><p className="caption">VERCEL_INTEGRATION_PENDING</p><p>Autorización por instalación y tokens temporales. El adaptador y callback definitivos están pendientes. No generes un token personal.</p><p><a style={{textDecoration:"underline",color:"#176b58"}} href="https://vercel.com/dashboard/integrations/console" target="_blank" rel="noreferrer">Integrations Console</a></p></div>
+ <VercelIntegrationConnection user={user} vault={vault} row={rows.find(x=>x.provider==="vercel")} onRefresh={load}/>
  <h3>Próximas conexiones</h3><p className="caption">Google Cloud / Firebase / BigQuery / IAM, Looker Studio Pro y Stripe: pendientes de adaptadores y autorización efectiva.</p></section>
 }
