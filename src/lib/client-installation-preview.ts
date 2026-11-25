@@ -6,7 +6,7 @@ const sameList=(a:unknown,b:unknown)=>{const x=keys(a),y=keys(b);return x.length
 const timestamp=(v:unknown)=>typeof v==="string"&&Number.isFinite(Date.parse(v));
 type Status="REUSE"|"VERIFY"|"BLOCKED"|"CONDITIONAL";
 type Step={resource:string;status:Status;reason:string;owner:"CLIENT"|"NIXINX"|"CLIENT_AND_NIXINX";evidence?:string};
-export function buildClientInstallationPreview(tenantId:string,intake:Obj,tenant:Obj|undefined,app:Obj|undefined,owner:Obj|undefined,license:Obj|undefined,confirmedHostname?:string){
+export function buildClientInstallationPreview(tenantId:string,intake:Obj,tenant:Obj|undefined,app:Obj|undefined,owner:Obj|undefined,license:Obj|undefined,hostnameEvidence?:{hostname?:string;reason:string}){
  const steps:Step[]=[];
  const add=(resource:string,status:Status,reason:string,owner:Step["owner"],evidence?:string)=>steps.push({resource,status,reason,owner,...(evidence?{evidence}:{})});
  const appId=intake.appId;
@@ -30,11 +30,11 @@ export function buildClientInstallationPreview(tenantId:string,intake:Obj,tenant
  add("legalIdentity","VERIFY","AUTHORIZED_OPERATOR_DOCUMENT_REVIEW_REQUIRED","CLIENT_AND_NIXINX");
  add("billingPayer","VERIFY","BILLING_LINK_IS_NOT_PAYER_IDENTITY","CLIENT_AND_NIXINX");
  add("security","VERIFY","ANCESTOR_IAM_DATA_ACCESS_ISOLATION_REVOCATION_NOT_CERTIFIED","CLIENT_AND_NIXINX");
- add("hostname",confirmedHostname?"VERIFY":"BLOCKED",confirmedHostname?"PRELIMINARY_HOSTNAME_CONFIRMED_ROUTING_AND_RUNTIME_PENDING":"EXPLICIT_HOSTNAME_AND_RUNTIME_CONTRACT_REQUIRED","NIXINX",confirmedHostname);
+ add("hostname",hostnameEvidence?.hostname?"VERIFY":"BLOCKED",hostnameEvidence?.reason??"CANONICAL_HOSTNAME_VALIDATION_REQUIRED","NIXINX",hostnameEvidence?.hostname);
  add("configuration","VERIFY","FRESH_SDK_RETRIEVAL_AND_CONFIGURATION_DIFF_REQUIRED","NIXINX");
  add("installation","VERIFY","DURABLE_INSTALLATION_PLAN_AND_READBACK_REQUIRED","NIXINX");
  add("runtimeAndData","VERIFY","HOSTNAME_RESOLUTION_AND_DATA_AUTHORIZATION_REQUIRED","CLIENT_AND_NIXINX");
  add("license",license&&(license.tenantId!==tenantId||license.appId!==appId)?"BLOCKED":"VERIFY",license?(license.tenantId!==tenantId||license.appId!==appId?"LICENSE_BINDING_CONFLICT":"EXISTING_LICENSE_PRESERVE"):"LICENSE_NOT_PRESENT_NO_ACTIVATION","NIXINX");
  if(registered)for(const x of keys(req.conditionalResources))add(x,"CONDITIONAL","NO_CREATION_WITHOUT_PRODUCT_REQUIREMENT_AND_AUTHORIZATION","NIXINX");
- return {mode:"CLIENT_INSTALLATION_PREVIEW_READ_ONLY",tenantId,appId,sourceCommit:registered?req.sourceCommit:null,hostname:confirmedHostname??null,steps,status:"BLOCKED_PENDING_GATES",applyAuthorized:false,technicalReady:false,commercialAuthorized:false,writes:0};
+ return {mode:"CLIENT_INSTALLATION_PREVIEW_READ_ONLY",tenantId,appId,sourceCommit:registered?req.sourceCommit:null,hostname:hostnameEvidence?.hostname??null,steps,status:"BLOCKED_PENDING_GATES",applyAuthorized:false,technicalReady:false,commercialAuthorized:false,writes:0};
 }

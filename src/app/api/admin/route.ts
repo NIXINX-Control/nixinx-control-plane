@@ -1,5 +1,6 @@
 import {NextRequest} from "next/server";
 import {adminUser,staffIdentity,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
+import {inspectNewTenantIdentity} from "@/lib/tenant-identity-precheck";
 import {appModuleDocId,isNewCatalogId,normalizeSelectedModules,validateSelectedModules} from "@/lib/catalog";
 
 export const runtime="nodejs";
@@ -56,6 +57,11 @@ export async function POST(req:NextRequest){
         if(existing.size>500)throw new ApiError(409,"Catalog too large for case-insensitive identity precheck");
         if(existing.docs.some(doc=>doc.id.toLowerCase()===id.toLowerCase()))
           throw new ApiError(409,"Identifier already exists (case-insensitive) and cannot be reused");
+      }
+      if(kind==="tenants"){
+        const [tenants,drafts,registry,configs,installations]=await Promise.all([tx.get(db.collection("tenants").limit(501)),tx.get(db.collection("clientProvisioning").limit(501)),tx.get(db.collection("tenantDnsSlugs").doc(id)),tx.get(db.collection("configurations").limit(501)),tx.get(db.collection("appInstallations").limit(501))]);
+        const rows=(s:typeof tenants)=>s.docs.map(x=>({id:x.id,data:x.data()}));
+        try{inspectNewTenantIdentity(id,rows(tenants),rows(drafts),registry.data(),rows(configs),rows(installations))}catch(e){throw new ApiError(409,(e as Error).message)}
       }
       if(kind==="modules"){
         const app=await tx.get(db.collection("apps").doc(appId));

@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
+const src=fs.readFileSync(new URL("../src/lib/tenant-identity-precheck.ts",import.meta.url),"utf8");
+const js=ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const {inspectNewTenantIdentity:check}=await import("data:text/javascript;base64,"+Buffer.from(js).toString("base64"));
+const row=(id,data={})=>({id,data});
+test("valid ID gives only internal availability and zero writes",()=>{assert.deepEqual(check("new-client",[],[],undefined,[],[]),{status:"AVAILABLE_IN_CONTROL",dnsSlug:"new-client",domainPattern:"new-client.<app>.nixinx.app",writes:0})});
+test("case, reserved intake, registry and hostname collision fail closed",()=>{for(const [t,d,r,c,i] of [[[row("HTL")],[],undefined,[],[]],[[],[row("HTL")],undefined,[],[]],[[],[],{tenantId:"OTHER"},[],[]],[[],[],undefined,[row("htl.initiatives.nixinx.app")],[]],[[],[],undefined,[],[row("legacy",{hostname:"htl.supply.nixinx.app"})]],[[],[row("OTHER",{hostnameBinding:{hostname:"htl.corporate.nixinx.app"}})],undefined,[],[]]])assert.throws(()=>check("htl",t,d,r,c,i));assert.throws(()=>check("HTL",[],[],undefined,[],[]));assert.throws(()=>check("htl",Array.from({length:501},(_,i)=>row("other"+i)),[],undefined,[],[]))});

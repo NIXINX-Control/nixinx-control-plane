@@ -1,6 +1,7 @@
 import {NextRequest} from "next/server";
 import {superadminUser,db,ok,fail,ApiError} from "@/lib/server";
 import {parseIntake,legalKey,decideIntake,buildIntakeRequirements,sameIntake,validateTenantSelection,intakeHostname,existingIdPattern} from "@/lib/client-provisioning";
+import {inspectNewTenantIdentity} from "@/lib/tenant-identity-precheck";
 import {parseProductManifest} from "@/lib/product-discovery";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
@@ -36,6 +37,11 @@ export async function POST(req:NextRequest){
     action=decideIntake(input,prior.data(),tenants.docs.map(d=>d.id),drafts.docs.filter(d=>d.id!==input.tenantId).map(d=>d.data().legalKey).filter((v):v is string=>typeof v==="string"))
    }catch(e){throw new ApiError(409,(e as Error).message)}
    if(action==="REUSE")return {status:"ALREADY_SAVED",writes:0};
+   if(input.mode!=="existing"){
+    const [registry,configs,installations]=await Promise.all([tx.get(db.collection("tenantDnsSlugs").doc(input.tenantId)),tx.get(db.collection("configurations").limit(501)),tx.get(db.collection("appInstallations").limit(501))]);
+    const rows=(s:typeof tenants)=>s.docs.map(x=>({id:x.id,data:x.data()}));
+    try{inspectNewTenantIdentity(input.tenantId,rows(tenants),rows(drafts),registry.data(),rows(configs),rows(installations))}catch(e){throw new ApiError(409,(e as Error).message)}
+   }
    const binding=app.data()?.provisioning;
    if(app.data()?.status!=="active"||!binding)throw new ApiError(409,"Producto no registrado técnicamente");
    let requirements;

@@ -1,6 +1,7 @@
 "use client";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import type {User} from "firebase/auth";
+import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
 
 export type CatalogRow={
   id:string;name?:string;status?:string;description?:string;
@@ -40,6 +41,7 @@ export default function CatalogManagement({
   const [message,setMessage]=useState("");
 
   useEffect(()=>{setMode(null);setEditing(null);setDraft({});setSelectedModules([]);setReason("");setError("");setMessage("");},[tab]);
+  const identityCheck=useTenantIdentityCheck(user,draft.id||"",mode==="new"&&tab==="tenants");
   const rows=data[tab]||[];
   const apps=data.apps.filter(a=>a.status!=="archived");
   const tenants=data.tenants.filter(t=>t.status==="active");
@@ -93,6 +95,7 @@ export default function CatalogManagement({
   async function save(){
     setError("");setMessage("");
     if(mode==="new"&&!checkNewId())return;
+    if(mode==="new"&&tab==="tenants"&&identityCheck?.status!=="available"){setError("Verifica primero la disponibilidad del ID.");return;}
     if(mode==="edit"&&!reason.trim()){setError("Explica el motivo del cambio para auditoría.");return;}
     if(tab==="licenses"){
       if(!draft.tenantId||!draft.appId||(draft.indefinite!=="yes"&&!draft.validUntil)){setError("Cliente, aplicación y vigencia son obligatorios.");return;}
@@ -183,6 +186,7 @@ export default function CatalogManagement({
             onChange={e=>set("id",e.target.value)}
           />
         </label>
+        {mode==="new"&&tab==="tenants"&&<div className="field full"><TenantIdentityInfo id={draft.id||""} check={identityCheck}/></div>}
         {tab!=="licenses"&&<>
           <label className="field">Nombre visible (editable)
             <input required maxLength={120} value={draft.name||""} onChange={e=>set("name",e.target.value)} placeholder={tab==="apps"?"Initiatives":tab==="modules"?"Panel de control":"Nombre comercial"}/>
@@ -236,7 +240,7 @@ export default function CatalogManagement({
         </label>}
         <div className="row full">
           <button type="button" className="btn secondary" onClick={reset} disabled={busy}>Cancelar</button>
-          <button className="btn" disabled={busy}>{busy?"Guardando…":mode==="edit"?"Guardar cambios":"Crear registro"}</button>
+          <button className="btn" disabled={busy||(mode==="new"&&tab==="tenants"&&identityCheck?.status!=="available")}>{busy?"Guardando…":mode==="edit"?"Guardar cambios":"Crear registro"}</button>
         </div>
       </form>
     </section>}

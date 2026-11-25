@@ -2,7 +2,7 @@ import {NextRequest} from "next/server";
 import {superadminUser,db,ok,fail,ApiError} from "@/lib/server";
 import {existingIdPattern} from "@/lib/client-provisioning";
 import {buildClientInstallationPreview} from "@/lib/client-installation-preview";
-import {parseHostnameApproval,hostnameIdentity,matchesHostnameDraft,decideHostnameDraft,canonicalTenantDnsSlug,assertTenantDnsIdentity} from "@/lib/client-hostname-draft";
+import {canonicalHostname,hostnameIdentity,inspectCanonicalHostname,canonicalTenantDnsSlug,assertTenantDnsIdentity} from "@/lib/client-hostname-draft";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export async function GET(req:NextRequest){
@@ -21,19 +21,24 @@ export async function GET(req:NextRequest){
     typeof project==="string"&&/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project)?tx.get(db.collection("firebaseProjectOwners").doc(project)):Promise.resolve(undefined),
     tx.get(db.collection("licenses").doc(id+"_"+d.appId))
    ]);
-   let confirmedHostname:string|undefined;
-   if(d.hostnameBinding){
+   const preliminary=buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data());
+   let hostnameEvidence:{hostname?:string;reason:string}={reason:"HOSTNAME_PREREQUISITES_REQUIRED"};
+   const needed=["tenant","product","googleBinding","firebaseResources","permissionPreflight","sdk"];
+   if(needed.every(r=>preliminary.steps.some(s=>s.resource===r&&s.status==="REUSE"))){
     try{
-     const input=parseHostnameApproval({tenantId:id,appId:d.appId,hostname:d.hostnameBinding.hostname,confirmed:true});
+     const hostname=canonicalHostname(id,d.appId),input={tenantId:id,appId:d.appId,hostname};
      const identity=hostnameIdentity(input,d);
      const [cfg,inst,candidates,bindings,catalog,dns]=await Promise.all([
-      tx.get(db.collection("configurations").doc(input.hostname)),tx.get(db.collection("appInstallations").doc(input.hostname)),
-      tx.get(db.collection("clientProvisioning").where("hostname","==",input.hostname).limit(3)),tx.get(db.collection("clientProvisioning").where("hostnameBinding.hostname","==",input.hostname).limit(3)),tx.get(db.collection("tenants").limit(501)),tx.get(db.collection("tenantDnsSlugs").doc(canonicalTenantDnsSlug(id)))]);
+      tx.get(db.collection("configurations").doc(hostname)),tx.get(db.collection("appInstallations").doc(hostname)),
+      tx.get(db.collection("clientProvisioning").where("hostname","==",hostname).limit(3)),tx.get(db.collection("clientProvisioning").where("hostnameBinding.hostname","==",hostname).limit(3)),tx.get(db.collection("tenants").limit(501)),tx.get(db.collection("tenantDnsSlugs").doc(canonicalTenantDnsSlug(id)))]);
      const dnsIdentity=assertTenantDnsIdentity(id,t.data(),catalog.docs.map(x=>({id:x.id,data:x.data()})),dns.data());
-     if(dnsIdentity.registered&&matchesHostnameDraft(d.hostnameBinding,identity)&&decideHostnameDraft(identity,d.hostnameBinding,[...candidates.docs,...bindings.docs].map(x=>({id:x.id,data:x.data()})),cfg.exists||inst.exists)==="REUSE")confirmedHostname=input.hostname;
-    }catch{ /* Conflict or invalid evidence: keep hostname blocked. */ }
+     hostnameEvidence=inspectCanonicalHostname(identity,d.hostnameBinding,[...candidates.docs,...bindings.docs].map(x=>({id:x.id,data:x.data()})),cfg.exists||inst.exists,dnsIdentity.registered);
+    }catch(e){
+     const reason=e instanceof Error?e.message:"";
+     hostnameEvidence={reason:["TENANT_DNS_RECONCILIATION_REQUIRED","TENANT_DNS_CONFLICT_REVIEW_REQUIRED","HOSTNAME_CONFLICT_REVIEW_REQUIRED","HOSTNAME_BINDING_IMMUTABLE","HOSTNAME_NOT_CANONICAL","HOSTNAME_APP_INVALID","HOSTNAME_INTAKE_NOT_ELIGIBLE"].includes(reason)?reason:"HOSTNAME_VALIDATION_UNAVAILABLE"};
+    }
    }
-   try{return buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),confirmedHostname)}catch{throw new ApiError(409,"CLIENT_PLAN_INTAKE_NOT_ELIGIBLE")}
+   return buildClientInstallationPreview(id,d,t.data(),app.data(),owner?.data(),license.data(),hostnameEvidence);
   },{readOnly:true});
   return ok(result);
  }catch(e){return fail(e)}
