@@ -2,22 +2,23 @@
 import {useEffect,useState} from "react";
 import type {User} from "firebase/auth";
 import {canonicalHostname} from "@/lib/client-hostname-draft";
-type Saved={pilotEmail?:string|null;pilotStatus?:string|null;version?:number;stagedAt?:string|null;planId:string;status:string;createdAt:string};
+type Saved={accessMode?:string;pilotEmail?:string|null;pilotStatus?:string|null;version?:number;stagedAt?:string|null;planId:string;status:string;createdAt:string};
 type Plan={durablePlan?:Saved;providerEvidence?:{releaseVerified?:boolean;scope?:string;dnsVerified?:boolean};status:string;hostname?:string|null;steps:{resource:string;status:string;reason:string;owner:string;evidence?:string}[];writes:number};
 const labels:Record<string,string>={tenant:"Cliente",product:"Producto y manifiesto",release:"Release y routing",dns:"Configuración DNS",googleBinding:"Delegación Google",firebaseResources:"Infraestructura Firebase",permissionPreflight:"Preflight IAM",sdk:"Configuración SDK",legalIdentity:"Identidad jurídica",billingPayer:"Pagador",security:"Seguridad y segregación",hostname:"Hostname automático",configuration:"Configuración runtime",installation:"Instalación",runtimeAndData:"Runtime y autorización de datos",license:"Licencia"};
 export default function ClientInstallationPreview({user,tenantId,appId}:{user:User;tenantId:string;appId:string}){
  let hostname="";try{hostname=canonicalHostname(tenantId,appId)}catch{/* Explicit reconciliation is required. */}
  const [plan,setPlan]=useState<Plan|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
  const durable=tenantId==="HTL" && appId==="initiatives";
+ const installationQuery=new URLSearchParams({tenantId,appId}).toString();
  const [pilotEmail,setPilotEmail]=useState("");
  const [verifiedPlan,setVerifiedPlan]=useState("");
  const [saved,setSaved]=useState<Saved|null>(null);
  useEffect(()=>{
   let current=true;
   setSaved(null);setPilotEmail("");
-  if(durable) void user.getIdToken().then(token=>fetch("/api/admin/provisioning/client/installation-plan?tenantId=HTL",{headers:{authorization:"Bearer "+token},cache:"no-store"})).then(async r=>{if(r.ok){const d=await r.json();if(current){setSaved(d.durablePlan);setPilotEmail(d.durablePlan?.pilotEmail??"")}}}).catch(()=>{});
+  void user.getIdToken().then(token=>fetch("/api/admin/provisioning/client/installation-plan?"+installationQuery,{headers:{authorization:"Bearer "+token},cache:"no-store"})).then(async r=>{if(r.ok){const d=await r.json();if(current){setSaved(d.durablePlan);setPilotEmail(d.durablePlan?.pilotEmail??"")}}}).catch(()=>{});
   return ()=>{current=false};
- },[durable,user]);
+ },[installationQuery,user]);
  async function run(){
   setBusy(true);setError("");setPlan(null);
   try{const r=await fetch("/api/admin/provisioning/client/"+(durable?"installation-plan":"plan")+"?tenantId="+encodeURIComponent(tenantId),{method:durable?"POST":"GET",headers:{authorization:"Bearer "+await user.getIdToken()},cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.error||"CLIENT_PLAN_UNAVAILABLE");setPlan(d);if(d.durablePlan)setSaved(d.durablePlan)}catch(e){setError((e as Error).message)}finally{setBusy(false)}
@@ -27,7 +28,7 @@ export default function ClientInstallationPreview({user,tenantId,appId}:{user:Us
   if(!saved)return;
   setBusy(true);setError("");
   try {
-   const response=await fetch("/api/admin/provisioning/client/pilot-operator?tenantId=HTL",{
+   const response=await fetch("/api/admin/provisioning/client/pilot-operator?"+installationQuery,{
     method:"POST",headers:{authorization:"Bearer "+await user.getIdToken(),"content-type":"application/json"},
     body:JSON.stringify({planId:saved.planId,email:pilotEmail})
    });
@@ -68,7 +69,7 @@ export default function ClientInstallationPreview({user,tenantId,appId}:{user:Us
  {durable&&saved?.stagedAt&&(verifiedPlan===saved.planId
   ? <p role="status">Módulo Iniciativas verificado para licencias.</p>
   : <button className="btn secondary" disabled={busy} onClick={()=>void verifyModule()}>Verificar módulo Iniciativas para licencias</button>)}
- {durable&&saved?.stagedAt&&<form onSubmit={e=>{e.preventDefault();void savePilot()}}>
+ {saved?.stagedAt&&saved.accessMode==="individual"&&<form onSubmit={e=>{e.preventDefault();void savePilot()}}>
   <label className="field">Correo del operador piloto<input type="email" required maxLength={254} value={pilotEmail}
     onChange={e=>setPilotEmail(e.target.value)} /></label>
   <button className="btn secondary" type="submit" disabled={busy||!pilotEmail.trim()||pilotEmail.trim().toLowerCase()===saved.pilotEmail}>Guardar operador piloto</button>
