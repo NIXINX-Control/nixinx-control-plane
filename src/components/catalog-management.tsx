@@ -1,5 +1,6 @@
 "use client";
 import SearchableRecordSelector from "@/components/searchable-record-selector";
+import {NEW_ORGANIZATION_ACRONYM_PATTERN,validNewOrganizationAcronym,validOrganizationAcronymDraft,normalizeOrganizationAcronym} from "@/lib/catalog";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import type {User} from "firebase/auth";
 import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
@@ -42,7 +43,8 @@ export default function CatalogManagement({
   const [message,setMessage]=useState("");
 
   useEffect(()=>{setMode(null);setEditing(null);setDraft({});setSelectedModules([]);setReason("");setError("");setMessage("");},[tab]);
-  const identityCheck=useTenantIdentityCheck(user,draft.id||"",mode==="new"&&tab==="tenants");
+  const newOrganization=mode==="new"&&tab==="tenants";
+  const identityCheck=useTenantIdentityCheck(user,draft.id||"",newOrganization&&validNewOrganizationAcronym(draft.id));
   const rows=data[tab]||[];
   const apps=data.apps.filter(a=>a.status!=="archived");
   const tenants=data.tenants.filter(t=>t.status==="active");
@@ -84,6 +86,7 @@ export default function CatalogManagement({
   function checkNewId():boolean{
     if(tab==="licenses")return true;
     const id=draft.id||"";
+    if(tab==="tenants"&&!validNewOrganizationAcronym(id)){setError("Acrónimo inválido: 2 a 35 caracteres, inicia con letra minúscula ASCII, solo a–z y 0–9.");return false;}
     if(!idPattern.test(id)){setError("El identificador debe contener 2 a 39 caracteres: minúsculas, números o guiones; debe iniciar con letra.");return false;}
     if(tab==="modules"){
       if(!draft.appId){setError("Selecciona la aplicación del módulo.");return false;}
@@ -178,13 +181,15 @@ export default function CatalogManagement({
           <input
             readOnly={mode==="edit"||tab==="licenses"}
             required
-            pattern={tab==="licenses"?undefined:"[a-z](?:[a-z0-9-]{0,37}[a-z0-9])"}
+            pattern={mode==="edit"||tab==="licenses"?undefined:newOrganization?NEW_ORGANIZATION_ACRONYM_PATTERN:"[a-z](?:[a-z0-9-]{0,37}[a-z0-9])"}
+            autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off"
             value={tab==="licenses"?licenseId:(draft.id||"")}
             placeholder={tab==="licenses"?"cliente_aplicacion":tab==="modules"?"dashboard":"initiatives"}
-            onChange={e=>set("id",e.target.value)}
+            onChange={e=>{const next=newOrganization?normalizeOrganizationAcronym(e.target.value):e.target.value;if(newOrganization&&!validOrganizationAcronymDraft(next)){setError("Acrónimo inválido: solo a–z y 0–9, inicia con letra, máximo 35 caracteres.");return;}set("id",next);if(newOrganization)setError("");}}
+            onPaste={e=>{if(!newOrganization)return;const el=e.currentTarget,raw=e.clipboardData.getData("text"),next=el.value.slice(0,el.selectionStart??0)+raw+el.value.slice(el.selectionEnd??el.value.length);if(!validOrganizationAcronymDraft(normalizeOrganizationAcronym(next))){e.preventDefault();setError("Texto pegado rechazado: caracteres inválidos o más de 35 caracteres.");}}}
           />
         </label>
-        {mode==="new"&&tab==="tenants"&&<div className="field full"><TenantIdentityInfo id={draft.id||""} check={identityCheck}/></div>}
+        {newOrganization&&<div className="field full"><p className="caption">Acrónimo obligatorio: 2–35 caracteres, inicia con letra minúscula ASCII; solo a–z y 0–9. Mayúsculas se convierten a minúsculas. Permanente una vez creado.</p>{validNewOrganizationAcronym(draft.id)&&<TenantIdentityInfo id={draft.id||""} check={identityCheck}/>}</div>}
         {tab!=="licenses"&&<>
           <label className="field">Nombre visible (editable)
             <input required maxLength={120} value={draft.name||""} onChange={e=>set("name",e.target.value)} placeholder={tab==="apps"?"Initiatives":tab==="modules"?"Panel de control":"Nombre comercial"}/>

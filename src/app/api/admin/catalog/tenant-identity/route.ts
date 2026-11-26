@@ -1,12 +1,13 @@
 import {NextRequest} from "next/server";
 import {adminUser,db,ok,fail,ApiError} from "@/lib/server";
+import {normalizeOrganizationAcronym} from "@/lib/catalog";
 import {inspectNewTenantIdentity,newTenantId} from "@/lib/tenant-identity-precheck";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export async function GET(req:NextRequest){
  try{
   await adminUser(req);
-  const id=req.nextUrl.searchParams.get("id")||"";
+  const id=normalizeOrganizationAcronym(req.nextUrl.searchParams.get("id")||"");
   if(!newTenantId.test(id)||req.nextUrl.searchParams.getAll("id").length!==1||[...req.nextUrl.searchParams.keys()].some(k=>k!=="id"))throw new ApiError(400,"TENANT_ID_INVALID");
   const result=await db.runTransaction(async tx=>{
    const [tenants,drafts,registry,configs,installations]=await Promise.all([
