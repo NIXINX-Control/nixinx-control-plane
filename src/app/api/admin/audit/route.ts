@@ -23,7 +23,7 @@ export async function GET(req:NextRequest){
    if(typeof data.at!=="string"||!Number.isFinite(Date.parse(data.at)))throw new ApiError(409,"Audit timestamp requires review");
    last={at:data.at,id:doc.id};
    const action=typeof data.action==="string"?data.action:"",commercial=action.startsWith("COMMERCIAL_");
-   const group=commercial?"commercial":/LICENSE/.test(action)?"licenses":/PROVISION|INSTALL|PROVIDER|WIF|FIREBASE|VERCEL|GITHUB|GOOGLE/.test(action)?"provisioning":/^(CREATE|UPDATE|ARCHIVE)_/.test(action)?"catalog":"other";
+   const group=commercial?"commercial":/LICENSE/.test(action)?"licenses":(/PROVISION|INSTALL|PROVIDER|WIF|FIREBASE|VERCEL|GITHUB|GOOGLE/.test(action)||["VERIFY_DEPLOYED_MODULE","DEFINE_PILOT_OPERATOR"].includes(action))?"provisioning":/^(CREATE|UPDATE|ARCHIVE)_/.test(action)?"catalog":"other";
    if(category!=="all"&&group!==category)continue;
    // Do not expose financial details to staff outside designated financial authority.
    const row={id:doc.id,at:data.at,action,target:typeof data.target==="string"?data.target:"",actor:typeof data.actor==="string"?data.actor:"",reason:(!commercial||staff.canEditPrice)&&typeof data.reason==="string"?data.reason:"",status:(!commercial||staff.canEditPrice)&&typeof data.status==="string"?data.status:"",...(commercial&&staff.canEditPrice?{amount:Number.isSafeInteger(data.amount)?data.amount:null,currency:typeof data.currency==="string"?data.currency:null,stripeStatus:typeof data.stripeStatus==="string"?data.stripeStatus:null}: {})};
