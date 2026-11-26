@@ -1,6 +1,6 @@
 "use client";
 import SearchableRecordSelector from "@/components/searchable-record-selector";
-import {NEW_ORGANIZATION_ACRONYM_PATTERN,validNewOrganizationAcronym,validOrganizationAcronymDraft} from "@/lib/catalog";
+import {NEW_ORGANIZATION_ACRONYM_PATTERN,validNewOrganizationAcronym,validOrganizationAcronymDraft,normalizeOrganizationAcronym} from "@/lib/catalog";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import type {User} from "firebase/auth";
 import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
@@ -185,11 +185,11 @@ export default function CatalogManagement({
             autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off"
             value={tab==="licenses"?licenseId:(draft.id||"")}
             placeholder={tab==="licenses"?"cliente_aplicacion":tab==="modules"?"dashboard":"initiatives"}
-            onChange={e=>{if(newOrganization&&!validOrganizationAcronymDraft(e.target.value)){setError("Acrónimo inválido: solo a–z y 0–9, inicia con letra, máximo 35 caracteres.");return;}set("id",e.target.value);if(newOrganization)setError("");}}
-            onPaste={e=>{if(!newOrganization)return;const el=e.currentTarget,raw=e.clipboardData.getData("text"),next=el.value.slice(0,el.selectionStart??0)+raw+el.value.slice(el.selectionEnd??el.value.length);if(!validOrganizationAcronymDraft(next)){e.preventDefault();setError("Texto pegado rechazado: caracteres inválidos o más de 35 caracteres.");}}}
+            onChange={e=>{const next=newOrganization?normalizeOrganizationAcronym(e.target.value):e.target.value;if(newOrganization&&!validOrganizationAcronymDraft(next)){setError("Acrónimo inválido: solo a–z y 0–9, inicia con letra, máximo 35 caracteres.");return;}set("id",next);if(newOrganization)setError("");}}
+            onPaste={e=>{if(!newOrganization)return;const el=e.currentTarget,raw=e.clipboardData.getData("text"),next=el.value.slice(0,el.selectionStart??0)+raw+el.value.slice(el.selectionEnd??el.value.length);if(!validOrganizationAcronymDraft(normalizeOrganizationAcronym(next))){e.preventDefault();setError("Texto pegado rechazado: caracteres inválidos o más de 35 caracteres.");}}}
           />
         </label>
-        {newOrganization&&<div className="field full"><p className="caption">Acrónimo obligatorio: 2–35 caracteres, inicia con letra minúscula ASCII; solo a–z y 0–9. Permanente una vez creado.</p>{validNewOrganizationAcronym(draft.id)&&<TenantIdentityInfo id={draft.id||""} check={identityCheck}/>}</div>}
+        {newOrganization&&<div className="field full"><p className="caption">Acrónimo obligatorio: 2–35 caracteres, inicia con letra minúscula ASCII; solo a–z y 0–9. Mayúsculas se convierten a minúsculas. Permanente una vez creado.</p>{validNewOrganizationAcronym(draft.id)&&<TenantIdentityInfo id={draft.id||""} check={identityCheck}/>}</div>}
         {tab!=="licenses"&&<>
           <label className="field">Nombre visible (editable)
             <input required maxLength={120} value={draft.name||""} onChange={e=>set("name",e.target.value)} placeholder={tab==="apps"?"Initiatives":tab==="modules"?"Panel de control":"Nombre comercial"}/>
