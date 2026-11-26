@@ -17,7 +17,12 @@ async function stripe(path:string,form?:URLSearchParams,key?:string){
  if(key)headers["Idempotency-Key"]=key;
  const r=await fetch("https://api.stripe.com/v1/"+path,{method:form?"POST":"GET",headers,body:form,cache:"no-store",signal:AbortSignal.timeout(15000)});
  if(!r.ok)throw new ApiError(503,"Stripe operation requires reconciliation");
- const v=await r.json();if(v.object==="list"?(!Array.isArray(v.data)||v.data.some((item:any)=>item.livemode!==false)):v.livemode!==false)throw new ApiError(409,"Live operation rejected");return v;
+ const v=await r.json();
+ // Stripe Refund objects have no livemode field. Only accept this exception on refund endpoints;
+ // the restricted test key and independently verified test Charge/PaymentIntent are the mode evidence.
+ const refundEndpoint=path==="refunds"||path.startsWith("refunds/")||path.startsWith("refunds?");
+ const validMode=(item:any)=>item?.livemode===false||(refundEndpoint&&item?.object==="refund"&&item.livemode===undefined);
+ if(v.object==="list"?(!Array.isArray(v.data)||v.data.some((item:any)=>!validMode(item))):!validMode(v))throw new ApiError(409,"Live operation rejected");return v;
 }
 function paymentId(v:unknown){if(typeof v!=="string"||!/^pi_[A-Za-z0-9]{8,100}$/.test(v))throw new ApiError(400,"Invalid payment reference");return v;}
 async function review(id:string){
@@ -33,6 +38,10 @@ async function reconcile(requestId:string){
  const snap=await ref.get(),record=snap.data();
  if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox")throw new ApiError(404,"Refund authorization not found");
  const id=paymentId(record.target),lock=db.collection("commercialRefundLocks").doc(id);
+ const intent=await stripe("payment_intents/"+id);
+ if(intent.id!==id||intent.customer!==record.customerId||intent.latest_charge!==record.chargeId||!/^ch_[A-Za-z0-9]+$/.test(record.chargeId))throw new ApiError(409,"Refund payment evidence mismatch");
+ const charge=await stripe("charges/"+record.chargeId);
+ if(charge.id!==record.chargeId||charge.payment_intent!==id||charge.customer!==record.customerId||charge.currency!=="cad"||intent.currency!=="cad")throw new ApiError(409,"Refund charge evidence mismatch");
  let refund:any;
  if(record.stripeRefundId){
   if(!/^re_[A-Za-z0-9]+$/.test(record.stripeRefundId))throw new ApiError(409,"Invalid stored refund reference");
