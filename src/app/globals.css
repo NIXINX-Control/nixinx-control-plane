@@ -134,3 +134,11 @@ body,.main{background:var(--canvas);color:var(--ink)}
  .btn.secondary:not(:disabled):hover,.btn.outline:not(:disabled):hover{background:#edf3f0}
  .record-list .item:hover{background:#f7f9f8}
 }
+
+
+/* Shared catalog selectors: same field tokens as ordinary Control inputs. */
+.searchable-record-selector{display:flex;flex-direction:column;gap:6px;min-width:0}
+.searchable-record-selector .searchable-record-input{width:100%;box-sizing:border-box}
+.searchable-record-options{border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.searchable-record-list{max-height:220px;overflow-y:auto;min-width:0}
+.searchable-record-option{display:block;width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere;margin-bottom:4px}
