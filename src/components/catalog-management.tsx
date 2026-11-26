@@ -4,7 +4,7 @@ import type {User} from "firebase/auth";
 import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
 
 export type CatalogRow={
-  id:string;name?:string;status?:string;description?:string;
+  id:string;name?:string;status?:string;description?:string;commercialPublished?:boolean;
   timeZone?:string;suspensionAt?:string;servicesSuspensionAt?:string;servicesTerminatedAt?:string;
   tenantId?:string;appId?:string;moduleId?:string;validUntil?:string|null;
   graceDays?:number;modules?:string[];verified?:boolean;
@@ -59,7 +59,7 @@ export default function CatalogManagement({
     setDraft({
       id:tab==="modules"?(row.moduleId||""):row.id,
       timeZone:row.timeZone||"",
-      name:row.name||"",description:row.description||"",
+      name:row.name||"",description:row.description||"",commercialPublished:row.commercialPublished===true?"yes":"no",
       appId:row.appId||"",tenantId:row.tenantId||"",
       status:row.status||(tab==="modules"?"active":"active"),
       validUntil:toLocalInput(row.validUntil),
@@ -116,7 +116,7 @@ export default function CatalogManagement({
           body.graceDays=Number(draft.graceDays||0);body.modules=selectedModules;
         }else{
           body.id=draft.id;body.name=draft.name;
-          if(tab==="apps")body.description=draft.description||"";
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";}
           if(tab==="modules")body.appId=draft.appId;
         }
         await api("/api/admin","POST",body);
@@ -129,13 +129,24 @@ export default function CatalogManagement({
         }else{
           const path="/api/admin/catalog/"+tab+"/"+encodeURIComponent(editing.id);
           const body:Record<string,unknown>={name:draft.name,status:draft.status,reason};
-          if(tab==="apps")body.description=draft.description||"";
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";}
           if(tab==="tenants"&&draft.timeZone?.trim())body.timeZone=draft.timeZone;
           if(tab==="tenants"&&draft.serviceAction)body.serviceAction=draft.serviceAction;
           await api(path,"PATCH",body);
         }
       }
       await onRefresh();reset();setMessage("Registro guardado. Los identificadores y relaciones permanecen inmutables.");
+    }catch(e){setError(friendlyError(e));}finally{setBusy(false);}
+  }
+
+  async function syncStripe(){
+    setBusy(true);setError("");setMessage("");
+    try{
+      const token=await user.getIdToken();
+      const response=await fetch("https://nixinx.com/api/customer-portal/catalog-sync",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:"{}",cache:"no-store"});
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error||"No se pudo sincronizar Stripe");
+      setMessage("Stripe sandbox: "+result.published+" publicados, "+result.archived+" archivados.");
     }catch(e){setError(friendlyError(e));}finally{setBusy(false);}
   }
 
@@ -148,7 +159,7 @@ export default function CatalogManagement({
          tab==="apps"?"Aplicaciones NIXINX con identificador estable":
          tab==="modules"?"Módulos autorizables por aplicación; identificadores vinculados al código":"Licencias y módulos válidos del catálogo"}
       </p>
-      <button className="btn" disabled={busy} onClick={startNew}>+ Nuevo</button>
+      <div className="row">{tab==="apps"&&<button className="btn secondary" disabled={busy} onClick={()=>void syncStripe()}>Sincronizar Stripe (pruebas)</button>}<button className="btn" disabled={busy} onClick={startNew}>+ Nuevo</button></div>
     </div>
     {message&&<p role="status" className="notice">{message}</p>}
     {error&&<p role="alert" className="error">{error}</p>}
@@ -194,6 +205,7 @@ export default function CatalogManagement({
           {tab==="apps"&&<label className="field full">Descripción
             <input maxLength={300} value={draft.description||""} onChange={e=>set("description",e.target.value)}/>
           </label>}
+          {tab==="apps"&&<label className="field full">Publicar en catálogo comercial / Stripe (pruebas)<select value={draft.commercialPublished||"no"} onChange={e=>set("commercialPublished",e.target.value)}><option value="no">No publicar</option><option value="yes">Publicar</option></select></label>}
           {tab==="tenants"&&mode==="edit"&&<>
             <label className="field">Zona horaria del cliente<input value={draft.timeZone||""} placeholder="America/Toronto" onChange={e=>set("timeZone",e.target.value)}/></label>
             <label className="field">Acceso para todas las aplicaciones
@@ -258,7 +270,7 @@ export default function CatalogManagement({
           {row.timeZone&&<div className="caption">Zona horaria: {row.timeZone}</div>}
           {(row.suspensionAt||row.servicesSuspensionAt)&&<div className="caption">Suspensión efectiva: {new Date((row.suspensionAt||row.servicesSuspensionAt)!).toLocaleString("es-CA",{timeZone:row.timeZone})}</div>}
           {row.servicesTerminatedAt&&<div className="caption">Servicios del cliente terminados</div>}
-          {row.status&&<div className="caption">Estado: {row.status}</div>}</div>
+          {tab==="apps"&&<div className="caption">Catálogo comercial: {row.commercialPublished===true&&row.status==="active"?"Publicado":"No publicado"}</div>}{row.status&&<div className="caption">Estado: {row.status}</div>}</div>
         </div>
         <div className="record-actions">
           <button className="btn outline tiny" disabled={busy} onClick={()=>startEdit(row)}>Editar</button>
