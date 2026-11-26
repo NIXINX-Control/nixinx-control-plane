@@ -1,7 +1,7 @@
 import {NextRequest} from "next/server";
 import {staffIdentity,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
 import {inspectNewTenantIdentity} from "@/lib/tenant-identity-precheck";
-import {appModuleDocId,isNewCatalogId,normalizeSelectedModules,validateSelectedModules} from "@/lib/catalog";
+import {appModuleDocId,isNewCatalogId,validNewOrganizationAcronym,normalizeSelectedModules,validateSelectedModules} from "@/lib/catalog";
 
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
@@ -26,6 +26,7 @@ export async function POST(req:NextRequest){
     const kind=str(body.kind,30);
     if(!["tenants","apps","modules","licenses"].includes(kind))throw new ApiError(400,"Unsupported record");
     const id=identifier(body.id);
+    if(kind==="tenants"&&!validNewOrganizationAcronym(body.id))throw new ApiError(400,"New organization ID: 2-35 lowercase ASCII alphanumeric characters, starting with a letter");
     if(kind!=="licenses"&&!isNewCatalogId(id))throw new ApiError(400,"Use a lowercase ID with letters, digits and hyphens (2-39 characters)");
     const appId=kind==="modules"?identifier(body.appId):kind==="licenses"?identifier(body.appId):"";
     const tenantId=kind==="licenses"?identifier(body.tenantId):"";
