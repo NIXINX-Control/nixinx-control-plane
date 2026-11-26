@@ -4,15 +4,17 @@ import {isDeepStrictEqual} from "node:util";
 import {readFileSync} from "node:fs";
 import ts from "typescript";
 
-test("inactive runtime staging checks providers, preserves the live paths and replays once", async () => {
- const id="a".repeat(64), tenant="clientProvisioning/HTL", planPath=tenant+"/installationPlans/"+id;
- const hostname="htl.initiatives.nixinx.app", projectId="hottacosleamingtonwebapp";
+for (const [tenantId,projectId] of [["HTL","hottacosleamingtonwebapp"],["ACME","acme-project"]]) test("inactive runtime staging checks providers and replays once: "+tenantId, async () => {
+ const id="a".repeat(64), tenant="clientProvisioning/"+tenantId, planPath=tenant+"/installationPlans/"+id;
+ const hostname=tenantId.toLowerCase()+".initiatives.nixinx.app", appId="initiatives";
+ const binding={projectId,projectNumber:"123",webAppId:"1:123:web:abc",tenantId,appId};
+ const requirements={sourceCommit:"old",deploymentId:"prior",repository:"NIXINX-Software/initiatives-portal",vercelProjectId:"prj_example123"};
  const target={sourceCommit:"new",registeredCommit:"old",deploymentId:"target",previousDeploymentId:"prior"};
- const plan={planId:id,tenantId:"HTL",appId:"initiatives",hostname,version:2,accessMode:"individual",
+ const plan={planId:id,tenantId,appId,hostname,version:2,accessMode:"individual",
    applyAuthorized:false,status:"PENDING_APPLY_REVIEW",configDigest:"digest",sourceCommit:"new",releaseTarget:target};
- const docs=new Map([[planPath,plan],[tenant,{tenantId:"HTL",appId:"initiatives",googleBinding:{projectId},requirements:{sourceCommit:"old",deploymentId:"prior"}}],
-   ["tenants/HTL",{status:"active"}],["apps/initiatives",{status:"active",provisioning:{sourceCommit:"old",deploymentId:"prior"}}],
-   ["firebaseProjectOwners/"+projectId,{tenantId:"HTL",projectId}]]);
+ const docs=new Map([[planPath,plan],[tenant,{tenantId,appId,googleBinding:binding,requirements}],
+   ["tenants/"+tenantId,{status:"active"}],["apps/initiatives",{status:"active",provisioning:requirements}],
+   ["firebaseProjectOwners/"+projectId,{tenantId,projectId,projectNumber:binding.projectNumber}]]);
  const snap=path=>({exists:docs.has(path),updateTime:{isEqual:()=>true},data:()=>docs.get(path),
    get:key=>key.split(".").reduce((v,k)=>v?.[k],docs.get(path))});
  const collection=path=>({doc:(id="audit")=>({path:path+"/"+id,get:async()=>snap(path+"/"+id),collection:key=>collection(path+"/"+id+"/"+key)}),
@@ -21,18 +23,23 @@ test("inactive runtime staging checks providers, preserves the live paths and re
  const db={collection,runTransaction:fn=>fn({get:async()=>({docs:[{id:latest}]}),getAll:async(...refs)=>refs.map(r=>snap(r.path)),
    create:(r,v)=>{assert.ok(!docs.has(r.path));docs.set(r.path,v)}})};
  class ApiError extends Error {constructor(status,message){super(message);this.status=status}}
- const config={status:"VERIFY",configDigest:"digest",candidate:{firebase:{projectId}}};
+ const config={status:"VERIFY",configDigest:"digest",candidate:{firebase:{projectId,appId:binding.webAppId,messagingSenderId:binding.projectNumber}}};
  const deps={"node:util":{isDeepStrictEqual},"@/lib/server":{db,ApiError,ok:x=>Response.json(x),
    fail:e=>Response.json({error:e.message},{status:e.status??500}),superadminUser:async()=>"operator"},
    "@/lib/client-runtime-config-preflight":{readRuntimeCandidate:async()=>config},
-   "@/lib/staged-initiatives-release":{stagedInitiativesRelease:async()=>target}};
+   "@/lib/client-google-binding":{restoreClientGoogleBinding:(b,tenant,app)=>{assert.equal(b.tenantId,tenant);assert.equal(b.appId,app);return b}},
+   "@/lib/client-hostname-draft":{canonicalHostname:(tenant,app)=>tenant.toLowerCase()+"."+app+".nixinx.app"},
+   "@/lib/staged-initiatives-release":{verifyPinnedInstallationRelease:async input=>{assert.equal(input.hostname,hostname);assert.equal(input.deploymentId,target.deploymentId);return {...target,hostname}}}};
  const path="../src/app/api/admin/provisioning/client/installation-apply/route.ts";
  const source=ts.transpileModule(readFileSync(new URL(path,import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const api={};Function("require","exports",source)(name=>deps[name],api);
- const req={nextUrl:new URL("https://example.test/?tenantId=HTL"),json:async()=>({planId:id}),headers:new Headers()};
+ const req={nextUrl:new URL("https://example.test/?tenantId="+tenantId+"&appId="+appId),json:async()=>({planId:id}),headers:new Headers()};
  const previous=process.env.VERCEL_ENV;process.env.VERCEL_ENV="production";
  try{
    const before=docs.size;
+   assert.equal((await api.POST({...req,nextUrl:new URL("https://example.test/?tenantId="+tenantId+"&appId=supply")})).status,409);
+   const owner=docs.get("firebaseProjectOwners/"+projectId);owner.tenantId="OTHER";
+   assert.equal((await api.POST(req)).status,409);owner.tenantId=tenantId;
    latest="other";assert.equal((await api.POST(req)).status,409);
    latest=id;config.configDigest="changed";assert.equal((await api.POST(req)).status,409);
    assert.equal(docs.size,before);config.configDigest="digest";
