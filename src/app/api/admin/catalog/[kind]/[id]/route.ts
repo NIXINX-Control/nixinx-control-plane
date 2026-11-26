@@ -1,5 +1,5 @@
 import {NextRequest} from "next/server";
-import {adminUser,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
+import {staffIdentity,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
 import {localDayBoundary,tenantTimeZone} from "@/lib/lifecycle";
 import {acceptsCatalogStatus} from "@/lib/catalog";
 
@@ -10,7 +10,7 @@ type Kind="tenants"|"apps"|"modules";
 
 export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:string;id:string}>}){
   try {
-    const actor=await adminUser(req);
+    const {uid:actor,canEditPrice}=await staffIdentity(req);
     const p=await params;
     if(!["tenants","apps","modules"].includes(p.kind))throw new ApiError(404,"Catalog not found");
     const kind=p.kind as Kind;
@@ -32,6 +32,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
       changes.description=body.description.trim();
     }
     if(body.commercialPriceCents!==undefined){
+      if(!canEditPrice)throw new ApiError(403,"Commercial price requires superadmin@nixinx.com");
       if(kind!=="apps"||!Number.isSafeInteger(body.commercialPriceCents)||body.commercialPriceCents<50||body.commercialPriceCents>99999999)throw new ApiError(400,"Invalid CAD price");
       changes.commercialPriceCents=body.commercialPriceCents;
     }
