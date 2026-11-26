@@ -1,4 +1,5 @@
 "use client";
+import SearchableRecordSelector from "@/components/searchable-record-selector";
 import {useCallback,useEffect,useState} from "react";
 import type {User} from "firebase/auth";
 type Tenant={id:string;name?:string;status?:string};
@@ -54,12 +55,7 @@ export default function Installations({user,tenants}:{user:User;tenants:Tenant[]
   {error&&<p className="error" role="alert">{error}</p>}
   {notice&&<p className="notice" role="status">{notice}</p>}
   <div className="fields">
-   <label className="field">Cliente
-    <select value={tenantId} onChange={e=>setTenantId(e.target.value)} disabled={busy}>
-     <option value="">Selecciona un cliente</option>
-     {tenants.filter(t=>t.status==="active").map(t=><option key={t.id} value={t.id}>{t.name||t.id} ({t.id})</option>)}
-    </select>
-   </label>
+   <SearchableRecordSelector label="Cliente técnico" value={tenantId} disabled={busy} options={tenants.filter(t=>t.status==="active").map(t=>({id:t.id,name:t.name||t.id}))} onChange={setTenantId}/>
    <label className="field">Hostname exacto
     <input value={hostname} onChange={e=>setHostname(e.target.value)} disabled={busy||production}/>
    </label>
