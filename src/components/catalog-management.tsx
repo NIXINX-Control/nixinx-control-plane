@@ -4,7 +4,7 @@ import type {User} from "firebase/auth";
 import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
 
 export type CatalogRow={
-  id:string;name?:string;status?:string;description?:string;
+  id:string;name?:string;status?:string;description?:string;commercialPublished?:boolean;commercialPriceCents?:number;
   timeZone?:string;suspensionAt?:string;servicesSuspensionAt?:string;servicesTerminatedAt?:string;
   tenantId?:string;appId?:string;moduleId?:string;validUntil?:string|null;
   graceDays?:number;modules?:string[];verified?:boolean;
@@ -52,14 +52,14 @@ export default function CatalogManagement({
   function reset(){setMode(null);setEditing(null);setDraft({});setSelectedModules([]);setReason("");setError("");}
 
   function startNew(){
-    setMode("new");setEditing(null);setDraft({graceDays:"0"});setSelectedModules([]);setReason("");setError("");setMessage("");
+    setMode("new");setEditing(null);setDraft({graceDays:"0",commercialPrice:"0.50"});setSelectedModules([]);setReason("");setError("");setMessage("");
   }
   function startEdit(row:CatalogRow){
     setMode("edit");setEditing(row);setError("");setMessage("");setReason("");
     setDraft({
       id:tab==="modules"?(row.moduleId||""):row.id,
       timeZone:row.timeZone||"",
-      name:row.name||"",description:row.description||"",
+      name:row.name||"",description:row.description||"",commercialPublished:row.commercialPublished===true?"yes":"no",commercialPrice:((row.commercialPriceCents??50)/100).toFixed(2),
       appId:row.appId||"",tenantId:row.tenantId||"",
       status:row.status||(tab==="modules"?"active":"active"),
       validUntil:toLocalInput(row.validUntil),
@@ -106,6 +106,7 @@ export default function CatalogManagement({
       }
       if(mode==="new"&&rows.some(r=>r.id===licenseId)){setError("Ya existe una licencia para este cliente y aplicación.");return;}
     }
+    if(tab==="apps"&&(!/^\d+(?:\.\d{1,2})?$/.test(draft.commercialPrice||"")||Number(draft.commercialPrice)<0.5||Number(draft.commercialPrice)>999999.99)){setError("Precio CAD inválido (mínimo 0.50).");return;}
     setBusy(true);
     try{
       if(mode==="new"){
@@ -116,7 +117,7 @@ export default function CatalogManagement({
           body.graceDays=Number(draft.graceDays||0);body.modules=selectedModules;
         }else{
           body.id=draft.id;body.name=draft.name;
-          if(tab==="apps")body.description=draft.description||"";
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
           if(tab==="modules")body.appId=draft.appId;
         }
         await api("/api/admin","POST",body);
@@ -129,13 +130,24 @@ export default function CatalogManagement({
         }else{
           const path="/api/admin/catalog/"+tab+"/"+encodeURIComponent(editing.id);
           const body:Record<string,unknown>={name:draft.name,status:draft.status,reason};
-          if(tab==="apps")body.description=draft.description||"";
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
           if(tab==="tenants"&&draft.timeZone?.trim())body.timeZone=draft.timeZone;
           if(tab==="tenants"&&draft.serviceAction)body.serviceAction=draft.serviceAction;
           await api(path,"PATCH",body);
         }
       }
       await onRefresh();reset();setMessage("Registro guardado. Los identificadores y relaciones permanecen inmutables.");
+    }catch(e){setError(friendlyError(e));}finally{setBusy(false);}
+  }
+
+  async function syncStripe(){
+    setBusy(true);setError("");setMessage("");
+    try{
+      const token=await user.getIdToken();
+      const response=await fetch("https://nixinx.com/api/customer-portal/catalog-sync",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:"{}",cache:"no-store"});
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error||"No se pudo sincronizar Stripe");
+      setMessage("Stripe sandbox: "+result.published+" publicados, "+result.archived+" archivados.");
     }catch(e){setError(friendlyError(e));}finally{setBusy(false);}
   }
 
@@ -148,7 +160,7 @@ export default function CatalogManagement({
          tab==="apps"?"Aplicaciones NIXINX con identificador estable":
          tab==="modules"?"Módulos autorizables por aplicación; identificadores vinculados al código":"Licencias y módulos válidos del catálogo"}
       </p>
-      <button className="btn" disabled={busy} onClick={startNew}>+ Nuevo</button>
+      <div className="row">{tab==="apps"&&<button className="btn secondary" disabled={busy} onClick={()=>void syncStripe()}>Sincronizar Stripe (pruebas)</button>}<button className="btn" disabled={busy} onClick={startNew}>+ Nuevo</button></div>
     </div>
     {message&&<p role="status" className="notice">{message}</p>}
     {error&&<p role="alert" className="error">{error}</p>}
@@ -194,6 +206,7 @@ export default function CatalogManagement({
           {tab==="apps"&&<label className="field full">Descripción
             <input maxLength={300} value={draft.description||""} onChange={e=>set("description",e.target.value)}/>
           </label>}
+          {tab==="apps"&&<><label className="field full">Precio de prueba (CAD)<input required type="number" min="0.50" max="999999.99" step="0.01" value={draft.commercialPrice||"0.50"} onChange={e=>set("commercialPrice",e.target.value)}/></label><label className="row full"><input type="checkbox" checked={draft.commercialPublished==="yes"} onChange={e=>set("commercialPublished",e.target.checked?"yes":"no")}/> Vender en catálogo comercial / Stripe (pruebas)</label></>}
           {tab==="tenants"&&mode==="edit"&&<>
             <label className="field">Zona horaria del cliente<input value={draft.timeZone||""} placeholder="America/Toronto" onChange={e=>set("timeZone",e.target.value)}/></label>
             <label className="field">Acceso para todas las aplicaciones
@@ -258,7 +271,7 @@ export default function CatalogManagement({
           {row.timeZone&&<div className="caption">Zona horaria: {row.timeZone}</div>}
           {(row.suspensionAt||row.servicesSuspensionAt)&&<div className="caption">Suspensión efectiva: {new Date((row.suspensionAt||row.servicesSuspensionAt)!).toLocaleString("es-CA",{timeZone:row.timeZone})}</div>}
           {row.servicesTerminatedAt&&<div className="caption">Servicios del cliente terminados</div>}
-          {row.status&&<div className="caption">Estado: {row.status}</div>}</div>
+          {tab==="apps"&&<div className="caption">Catálogo comercial: {row.commercialPublished===true&&row.status==="active"?"Publicado":"No publicado"} · CAD {((row.commercialPriceCents??50)/100).toFixed(2)}</div>}{row.status&&<div className="caption">Estado: {row.status}</div>}</div>
         </div>
         <div className="record-actions">
           <button className="btn outline tiny" disabled={busy} onClick={()=>startEdit(row)}>Editar</button>

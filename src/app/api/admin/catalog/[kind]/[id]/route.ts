@@ -20,7 +20,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
     const ref=db.collection(kind==="modules"?"appModules":kind).doc(docId);
     const body=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
     if(!body||typeof body!=="object"||Array.isArray(body))throw new ApiError(400,"Invalid edit request");
-    const allowed=["name","description","status","reason","timeZone","serviceAction"];
+    const allowed=["name","description","status","reason","timeZone","serviceAction","commercialPublished","commercialPriceCents"];
     if(Object.keys(body).some(key=>!allowed.includes(key)))
       throw new ApiError(400,"IDs and application bindings are immutable");
     const reason=str(body.reason,500);
@@ -30,6 +30,14 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{kind:strin
       if(kind!=="apps"||typeof body.description!=="string"||body.description.length>300)
         throw new ApiError(400,"Invalid application description");
       changes.description=body.description.trim();
+    }
+    if(body.commercialPriceCents!==undefined){
+      if(kind!=="apps"||!Number.isSafeInteger(body.commercialPriceCents)||body.commercialPriceCents<50||body.commercialPriceCents>99999999)throw new ApiError(400,"Invalid CAD price");
+      changes.commercialPriceCents=body.commercialPriceCents;
+    }
+    if(body.commercialPublished!==undefined){
+      if(kind!=="apps"||typeof body.commercialPublished!=="boolean")throw new ApiError(400,"Invalid commercial publication flag");
+      changes.commercialPublished=body.commercialPublished;
     }
     if(body.status!==undefined){
       if(!acceptsCatalogStatus(kind,body.status))throw new ApiError(400,"Invalid catalog status");
