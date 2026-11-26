@@ -92,3 +92,61 @@ export async function reserveNativeCreditAuthorization(db:Firestore,actor:string
   return {disposition:"RESERVED" as const,requestId:intent.requestId,fingerprint};
  });
 }
+
+/** Independently refreshed server-side payment and commercial binding evidence. */
+export type NativeCreditReconcileBinding={acronym:string;orderId:string;subscriptionId:string;invoiceId:string;paymentIntentId:string;chargeId:string;customerId:string;captured:number;refunded:number};
+type StripeRead=(path:string)=>Promise<any>;
+/** Reconciliation only: no Stripe POST, no retry of an uncertain issuance.
+ * A future authenticated caller must supply fresh review/boundPayment evidence.
+ * Failed/canceled refunds retain the lock because the fiscal note may still exist.
+ */
+export async function reconcileNativeCredit(db:Firestore,requestId:string,binding:NativeCreditReconcileBinding,stripeRead:StripeRead){
+ ensure(typeof requestId==="string"&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(requestId),"Invalid credit request");
+ const ref=db.collection("audit").doc("commercial-refund-"+requestId);
+ const lock=db.collection("commercialRefundLocks").doc(binding.paymentIntentId);
+ const snapshot=await db.runTransaction(async tx=>{
+  const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  ensure(record.exists&&record.get("action")==="COMMERCIAL_REFUND"&&record.get("operation")==="NATIVE_CREDIT_REFUND_V1"&&record.get("environment")==="sandbox"&&record.get("requestId")===requestId,"Native authorization not found");
+  const x=record.get("creditIntent") as NativeCreditIntent;
+  ensure(x&&typeof x==="object","Missing credit intent");validateNativeCreditIntent(x);
+  const fingerprint=record.get("fingerprint");
+  ensure(typeof fingerprint==="string"&&/^[a-f0-9]{64}$/.test(fingerprint)&&x.requestId===requestId&&x.paymentIntentId===binding.paymentIntentId&&x.chargeId===binding.chargeId&&x.customerId===binding.customerId&&x.invoiceId===binding.invoiceId&&record.get("target")===x.paymentIntentId&&record.get("chargeId")===x.chargeId&&record.get("customerId")===x.customerId&&record.get("invoiceId")===x.invoiceId&&record.get("amount")===x.amount&&record.get("currency")==="cad"&&record.get("acronym")===binding.acronym&&record.get("orderId")===binding.orderId&&record.get("subscriptionId")===binding.subscriptionId,"Native authorization binding mismatch");
+  const state=record.get("status"),prior=record.get("stripeStatus");
+  ensure(state==="AUTHORIZED"||state==="STRIPE_RECORDED","Native authorization not executable or reconcilable");
+  const succeeded=state==="STRIPE_RECORDED"&&prior==="succeeded";
+  if(!succeeded)ensure(active.exists&&active.get("requestId")===requestId&&active.get("operation")==="NATIVE_CREDIT_REFUND_V1"&&active.get("fingerprint")===fingerprint,"Native reconciliation lock mismatch");
+  return {x,fingerprint,creditNoteId:record.get("stripeCreditNoteId"),refundId:record.get("stripeRefundId")};
+ });
+ const {x,fingerprint}=snapshot;
+ ensure(cents(binding.captured)&&cents(binding.refunded)&&binding.captured>=binding.refunded&&binding.captured>=x.amount,"Invalid payment reconciliation balance");
+ const invoice=await stripeRead("invoices/"+x.invoiceId);
+ ensure(invoice?.object==="invoice"&&invoice.livemode===false&&invoice.id===x.invoiceId&&invoice.customer===x.customerId&&invoice.payment_intent===x.paymentIntentId&&invoice.subscription===binding.subscriptionId&&invoice.currency==="cad"&&invoice.status==="paid"&&invoice.amount_paid===binding.captured,"Invoice reconciliation mismatch");
+ const page=await stripeRead("credit_notes?"+new URLSearchParams({invoice:x.invoiceId,limit:"100"}));
+ ensure(page?.object==="list"&&page.has_more===false&&Array.isArray(page.data)&&page.data.every((n:any)=>n?.object==="credit_note"&&n.livemode===false&&n.invoice===x.invoiceId),"Credit history requires reconciliation");
+ const matches=page.data.filter((n:any)=>n.metadata?.nixinx_request_id===requestId);
+ ensure(matches.length===1&&id(matches[0].id,"cn_"),"No unique Stripe credit note; retain authorization lock");
+ const note=await stripeRead("credit_notes/"+matches[0].id);
+ ensure(note?.id===matches[0].id&&id(note.refund,"re_"),"Credit refund reference missing");
+ const refund=await stripeRead("refunds/"+note.refund);
+ const result=validateIssuedCredit(note,refund,x);
+ ensure((!snapshot.creditNoteId||snapshot.creditNoteId===result.creditNoteId)&&(!snapshot.refundId||snapshot.refundId===result.refundId),"Stored credit/refund reference conflict");
+ // A succeeded refund must be reflected on the independently verified charge;
+ // a stale charge read must not release the lock.
+ if(result.status==="succeeded")ensure(binding.refunded===x.amount,"Charge refund readback requires reconciliation");
+ return db.runTransaction(async tx=>{
+  const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  ensure(record.exists&&record.get("fingerprint")===fingerprint&&record.get("operation")==="NATIVE_CREDIT_REFUND_V1"&&record.get("environment")==="sandbox"&&record.get("requestId")===requestId&&nativeCreditForm(record.get("creditIntent")).toString()===nativeCreditForm(x).toString()&&record.get("creditIntent").paymentIntentId===x.paymentIntentId&&record.get("creditIntent").chargeId===x.chargeId&&record.get("creditIntent").customerId===x.customerId&&record.get("creditIntent").tax===x.tax&&JSON.stringify([...record.get("creditIntent").taxRateIds].sort())===JSON.stringify([...x.taxRateIds].sort()),"Native reconciliation audit conflict");
+  ensure((!record.get("stripeCreditNoteId")||record.get("stripeCreditNoteId")===result.creditNoteId)&&(!record.get("stripeRefundId")||record.get("stripeRefundId")===result.refundId),"Native reconciliation reference conflict");
+  const status=record.get("status"),prior=record.get("stripeStatus");
+  ensure(status==="AUTHORIZED"||status==="STRIPE_RECORDED","Native reconciliation state conflict");
+  if(status==="STRIPE_RECORDED"&&["succeeded","failed","canceled"].includes(prior)){
+   ensure(prior===result.status,"Native terminal status conflict");
+   if(prior==="succeeded")return {...result,reconciled:true,lockRetained:false};
+  }
+  ensure(active.exists&&active.get("requestId")===requestId&&active.get("operation")==="NATIVE_CREDIT_REFUND_V1"&&active.get("fingerprint")===fingerprint,"Native reconciliation lock mismatch");
+  const at=new Date().toISOString();
+  tx.update(ref,{status:"STRIPE_RECORDED",stripeCreditNoteId:result.creditNoteId,stripeRefundId:result.refundId,stripeStatus:result.status,reconciledAt:at});
+  if(result.status==="succeeded")tx.delete(lock);
+  return {...result,reconciled:true,lockRetained:result.status!=="succeeded"};
+ });
+}
