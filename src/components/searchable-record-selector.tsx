@@ -5,7 +5,7 @@ export default function SearchableRecordSelector({label,value,onChange,options,d
  const id=useId(),[query,setQuery]=useState(""),[open,setOpen]=useState(false);
  const selected=options.find(o=>o.id===value),inputRef=useRef<HTMLInputElement>(null);
  useEffect(()=>{inputRef.current?.setCustomValidity(required&&!disabled&&!selected?"Selecciona un registro existente.":"");},[required,disabled,selected]);
- const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+ const norm=(v:string)=>v.normalize("NFD").replace(/\p{M}/gu,"").toLowerCase();
  const needle=norm(query.trim()),filtered=options.filter(o=>norm(o.id+" "+o.name).includes(needle));
  return <div style={{minWidth:0,marginBottom:10}}><label htmlFor={id}>{label}</label>
  <input ref={inputRef} id={id} aria-required={required} style={{width:"100%",boxSizing:"border-box"}} autoComplete="off" placeholder="Buscar por ID o nombre" value={open?query:selected?selected.id+" - "+selected.name:disabled&&value?value:query} disabled={disabled} aria-expanded={open&&!disabled} aria-controls={id+"-options"} onFocus={()=>{if(!open){setOpen(true);setQuery("");}}} onChange={e=>{setQuery(e.target.value);if(value)onChange("");setOpen(true);}} onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setOpen(false);}if(e.key==="Enter"&&open){e.preventDefault();if(filtered.length===1){onChange(filtered[0].id);setQuery("");setOpen(false);}}}}/>
