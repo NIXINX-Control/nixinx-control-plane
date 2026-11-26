@@ -63,19 +63,30 @@ async function reconcile(requestId:string){
  });
  return {id:refund.id,status:refund.status,amount:refund.amount,reconciled:true};
 }
-export async function GET(req:NextRequest){
- try{await authorized(req);const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
+async function commercialLookup(req:NextRequest,acronym:string){
  if(!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(acronym))throw new ApiError(400,"Invalid commercial acronym");
  const response=await fetch("https://nixinx.com/api/customer-portal/financial-lookup",{method:"POST",headers:{Authorization:req.headers.get("authorization")||"","Content-Type":"application/json"},body:JSON.stringify({acronym}),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(20000)});
  if(!response.ok)throw new ApiError(503,"Commercial payment lookup unavailable");
  const data=await response.json();if(!Array.isArray(data.payments)||data.payments.length>100)throw new ApiError(503,"Invalid commercial payment lookup");
- return ok(data);
+ return data;
+}
+async function boundPayment(req:NextRequest,acronym:string,id:string,p:Awaited<ReturnType<typeof review>>){
+ const data=await commercialLookup(req,acronym);
+ const matches=data.payments.filter((v:any)=>v.paymentIntentId===id);
+ if(matches.length!==1)throw new ApiError(409,"Payment is not uniquely bound to a commercial order");
+ const v=matches[0];
+ if(!/^in_[A-Za-z0-9]+$/.test(v.invoiceId??"")||!/^sub_[A-Za-z0-9]+$/.test(v.subscriptionId??"")||typeof v.orderId!=="string"||!v.orderId||v.orderId.length>200||v.customerId!==p.customerId||v.amount!==p.captured||v.currency!=="cad")throw new ApiError(409,"Commercial invoice binding mismatch");
+ return {acronym,invoiceId:v.invoiceId as string,orderId:v.orderId as string,subscriptionId:v.subscriptionId as string};
+}
+export async function GET(req:NextRequest){
+ try{await authorized(req);const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
+ return ok(await commercialLookup(req,acronym));
  }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
 }
 export async function POST(req:NextRequest){
  try{
  const actor=await authorized(req);const b=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
- if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).some(k=>!["paymentIntentId","amount","reason","requestId","expectedRefunded","confirmed"].includes(k)))throw new ApiError(400,"Invalid refund request");
+ if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).some(k=>!["paymentIntentId","amount","reason","requestId","expectedRefunded","confirmed","acronym"].includes(k)))throw new ApiError(400,"Invalid refund request");
  const id=paymentId(b.paymentIntentId),reason=str(b.reason,500);
  if(b.confirmed!==true||typeof b.requestId!=="string"||!(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(b.requestId))||!Number.isSafeInteger(b.amount)||b.amount<=0||!Number.isSafeInteger(b.expectedRefunded)||b.expectedRefunded<0)throw new ApiError(400,"Invalid refund authorization");
  const fingerprint=createHash("sha256").update(JSON.stringify([actor,id,b.amount,reason,b.expectedRefunded])).digest("hex");
@@ -88,17 +99,20 @@ export async function POST(req:NextRequest){
   return ok(await reconcile(requestIdentifier(b.requestId)));
  }
  const p=await review(id);
+ const binding=await boundPayment(req,typeof b.acronym==="string"?b.acronym:"",id,p);
  if(p.refunded!==b.expectedRefunded||!validRefundAmount(b.amount,p.available))throw new ApiError(409,"Refund balance changed; review payment again");
  await db.runTransaction(async tx=>{
   const [old,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
   if(old.exists||active.exists)throw new ApiError(409,"Refund in progress or reconciliation required");
-  tx.create(ref,{actor,action:"COMMERCIAL_REFUND",target:id,customerId:p.customerId,chargeId:p.chargeId,amount:b.amount,currency:"cad",reason,fingerprint,status:"VALIDATING",environment:"sandbox",at:new Date().toISOString()});
+  tx.create(ref,{actor,action:"COMMERCIAL_REFUND",target:id,customerId:p.customerId,chargeId:p.chargeId,...binding,amount:b.amount,currency:"cad",reason,fingerprint,status:"VALIDATING",environment:"sandbox",at:new Date().toISOString()});
   tx.create(lock,{requestId:b.requestId,at:new Date().toISOString()});
  });
  // Re-read under the durable lock: a competing refund may have completed after the first review.
  let latest:Awaited<ReturnType<typeof review>>;
  try{
   latest=await review(id);
+  const currentBinding=await boundPayment(req,binding.acronym,id,latest);
+  if(JSON.stringify(currentBinding)!==JSON.stringify(binding))throw new ApiError(409,"Commercial binding changed");
   if(latest.chargeId!==p.chargeId||latest.customerId!==p.customerId||latest.refunded!==b.expectedRefunded||!validRefundAmount(b.amount,latest.available))throw new ApiError(409,"Refund balance changed; review payment again");
  }catch(error){
   // No Stripe mutation has been attempted. Release only our own validation lock.
