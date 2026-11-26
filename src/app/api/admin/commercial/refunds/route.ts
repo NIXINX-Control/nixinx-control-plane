@@ -98,12 +98,27 @@ async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  if(!Number.isSafeInteger(originalTax)||invoice.tax!==originalTax||invoice.total!==line.amount+originalTax||invoice.total!==invoice.amount_paid)throw new ApiError(409,"Original invoice tax evidence mismatch");
  // Estimate line amount from the original invoice's actual monetary split. Stripe alone
  // determines the tax and final total; no local rate table, no adjustment or rounding fallback.
- const lineAmount=Math.round(refund.amount*line.amount/invoice.total);
- if(!Number.isSafeInteger(lineAmount)||lineAmount<=0||lineAmount>line.amount)throw new ApiError(409,"Refund requires line allocation review");
- const preview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,"lines[0][type]":"invoice_line_item","lines[0][invoice_line_item]":line.id,"lines[0][amount]":String(lineAmount),refund:refund.id,email_type:"none"}));
- if(preview.lines?.has_more!==false||preview.lines?.data?.length!==1||preview.lines.data[0].type!=="invoice_line_item"||preview.lines.data[0].invoice_line_item!==line.id||preview.total_excluding_tax!==lineAmount)throw new ApiError(409,"Stripe preview line mismatch");
- if(originalTax>0&&refund.amount-lineAmount>0&&preview.total===preview.total_excluding_tax)throw new ApiError(409,"Expected tax credit missing from Stripe preview");
- if(!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!line.tax_amounts.some((original:any)=>original.tax_rate===t.tax_rate)))throw new ApiError(409,"Stripe tax rate reference mismatch");
+ const estimate=Math.round(refund.amount*line.amount/invoice.total);
+ if(!Number.isSafeInteger(estimate)||estimate<=0||estimate>line.amount)throw new ApiError(409,"Refund requires line allocation review");
+ async function previewLine(base:number){
+  const pview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,"lines[0][type]":"invoice_line_item","lines[0][invoice_line_item]":line.id,"lines[0][amount]":String(base),refund:refund.id,email_type:"none"}));
+  if(pview.lines?.has_more!==false||pview.lines?.data?.length!==1||pview.lines.data[0].type!=="invoice_line_item"||pview.lines.data[0].invoice_line_item!==line.id||pview.total_excluding_tax!==base)throw new ApiError(409,"Stripe preview line mismatch");
+  if(originalTax>0&&refund.amount-base>0&&pview.total===pview.total_excluding_tax)throw new ApiError(409,"Expected tax credit missing from Stripe preview");
+  if(!Array.isArray(pview.tax_amounts)||pview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0||!line.tax_amounts.some((original:any)=>original.tax_rate===t.tax_rate)))throw new ApiError(409,"Stripe tax rate reference mismatch");
+  if(pview.object!=="credit_note"||pview.invoice!==invoice.id||pview.customer!==invoice.customer||pview.currency!=="cad"||pview.type!=="post_payment"||!Number.isSafeInteger(pview.total)||pview.total<base||pview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==pview.total-base||(pview.refund!==null&&pview.refund!==refund.id)||(pview.out_of_band_amount??0)!==0||pview.customer_balance_transaction)throw new ApiError(409,"Stripe preview integrity mismatch");
+  return pview;
+ }
+ let preview=await previewLine(estimate);
+ // Stripe rounds tax from original invoice evidence. Test at most one adjacent
+ // integer line amount in the indicated direction. Do not modify tax or issue a note.
+ if(preview.total!==refund.amount){
+  const next=estimate+(preview.total>refund.amount?-1:1);
+  if(next>0&&next<=line.amount){
+   const adjacent=await previewLine(next);
+   if(adjacent.total!==refund.amount)throw new ApiError(409,"No se encontró una distribución exacta (centavos CAD). Stripe: base "+estimate+", impuesto "+(preview.total-estimate)+", total "+preview.total+"; base "+next+", impuesto "+(adjacent.total-next)+", total "+adjacent.total+". Reembolso: "+refund.amount+". Revisión fiscal requerida. Sin emisión.");
+   preview=adjacent;
+  }
+ }
  if(preview.object!=="credit_note"||preview.invoice!==invoice.id||preview.customer!==p.customerId||preview.currency!=="cad"||preview.type!=="post_payment"||preview.total!==refund.amount||!Number.isSafeInteger(preview.total_excluding_tax)||preview.total_excluding_tax<0||preview.total_excluding_tax>preview.total||!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0)||preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==preview.total-preview.total_excluding_tax){
   // Expose only authenticated, non-secret integer amounts and boolean guard results.
   // This is a diagnosis, never a relaxed acceptance criterion.
