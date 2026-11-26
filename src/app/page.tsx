@@ -2,6 +2,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import {GoogleAuthProvider,onAuthStateChanged,signInWithPopup,signOut,User} from "firebase/auth";
 import {auth} from "@/lib/firebase-client";
+import AuditSearch from "@/components/audit-search";
 import CommercialRefunds from "@/components/commercial-refunds";
 import Configurations from "@/components/configurations";
 import CatalogManagement from "@/components/catalog-management";
@@ -59,7 +60,7 @@ return <div className="shell"><aside className="side"><div className="brand spac
 {tab==="configurations"&&data.viewerRole==="superadmin"&&<ProviderConnections key={user.uid} user={user}/>}
 {tab==="configurations"&&(data.viewerRole==="admin"||data.viewerRole==="superadmin")&&<Configurations user={user} tenants={data.tenants} apps={data.apps}/>}
 {tab==="commercial"&&data.canEditPrice===true&&<CommercialRefunds key={user.uid} user={user}/>}
-{tab==="audit"&&<section className="panel"><h3 className="subheading">Eventos auditados</h3>{data.logs.length?data.logs.map((a,i)=><div className="item" key={a.id||i}><div><b>{a.action}</b><div className="caption">{a.target} · {a.actor}</div><div className="caption">{a.at}</div></div></div>):<div className="empty">Todavía no hay eventos.</div>}</section>}
+{tab==="audit"&&<AuditSearch key={user.uid} user={user}/>}
 {transition&&<form key={transition} className="panel license-transition" ref={revealTransition} aria-label="Cambiar estado de licencia" onSubmit={event=>{
   event.preventDefault();
   const expiry=new FormData(event.currentTarget).get("replacementExpiry");
