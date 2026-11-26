@@ -17,7 +17,7 @@ async function stripe(path:string,form?:URLSearchParams,key?:string){
  if(key)headers["Idempotency-Key"]=key;
  const r=await fetch("https://api.stripe.com/v1/"+path,{method:form?"POST":"GET",headers,body:form,cache:"no-store",signal:AbortSignal.timeout(15000)});
  if(!r.ok)throw new ApiError(503,"Stripe operation requires reconciliation");
- const v=await r.json();if(v.livemode!==false)throw new ApiError(409,"Live operation rejected");return v;
+ const v=await r.json();if(v.object==="list"?(!Array.isArray(v.data)||v.data.some((item:any)=>item.livemode!==false)):v.livemode!==false)throw new ApiError(409,"Live operation rejected");return v;
 }
 function paymentId(v:unknown){if(typeof v!=="string"||!/^pi_[A-Za-z0-9]{8,100}$/.test(v))throw new ApiError(400,"Invalid payment reference");return v;}
 async function review(id:string){
@@ -27,23 +27,49 @@ async function review(id:string){
  let available:number;try{available=refundablePayment(intent,charge,customer);}catch{throw new ApiError(409,"Payment not eligible");}
  return {paymentIntentId:id,customerId:customer.id,customerName:typeof customer.name==="string"?customer.name:null,chargeId:charge.id,currency:"cad",captured:charge.amount_captured,refunded:charge.amount_refunded,available};
 }
+function requestIdentifier(v:unknown){if(typeof v!=="string"||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v))throw new ApiError(400,"Invalid refund request reference");return v;}
+async function reconcile(requestId:string){
+ const ref=db.collection("audit").doc("commercial-refund-"+requestId);
+ const snap=await ref.get(),record=snap.data();
+ if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox")throw new ApiError(404,"Refund authorization not found");
+ const id=paymentId(record.target),lock=db.collection("commercialRefundLocks").doc(id);
+ let refund:any;
+ if(record.stripeRefundId){
+  if(!/^re_[A-Za-z0-9]+$/.test(record.stripeRefundId))throw new ApiError(409,"Invalid stored refund reference");
+  refund=await stripe("refunds/"+record.stripeRefundId);
+ }else{
+  const page=await stripe("refunds?"+new URLSearchParams({payment_intent:id,limit:"100"}));
+  if(page.has_more)throw new ApiError(409,"Refund history requires manual reconciliation");
+  const matches=page.data.filter((r:any)=>r.metadata?.nixinx_request_id===requestId);
+  if(matches.length!==1)throw new ApiError(409,"No unique Stripe refund found. Authorization remains locked; do not create another request.");
+  refund=matches[0];
+ }
+ if(!/^re_[A-Za-z0-9]+$/.test(refund.id??"")||refund.payment_intent!==id||refund.charge!==record.chargeId||refund.amount!==record.amount||refund.currency!=="cad"||refund.metadata?.nixinx_request_id!==requestId||refund.metadata?.nixinx_owner!=="nixinx-commercial-sandbox-v1"||!["succeeded","pending","requires_action","failed","canceled"].includes(refund.status))throw new ApiError(409,"Refund evidence mismatch");
+ await db.runTransaction(async tx=>{
+  const [current,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  if(current.get("fingerprint")!==record.fingerprint||(current.get("stripeRefundId")&&current.get("stripeRefundId")!==refund.id))throw new ApiError(409,"Refund audit conflict");
+  if(active.exists&&active.get("requestId")!==requestId&&!["succeeded","failed","canceled"].includes(current.get("stripeStatus")))throw new ApiError(409,"Refund lock mismatch");
+  tx.update(ref,{stripeRefundId:refund.id,stripeStatus:refund.status,status:"STRIPE_RECORDED",reconciledAt:new Date().toISOString()});
+  if(active.exists&&active.get("requestId")===requestId&&["succeeded","failed","canceled"].includes(refund.status))tx.delete(lock);
+ });
+ return {id:refund.id,status:refund.status,amount:refund.amount,reconciled:true};
+}
 export async function GET(req:NextRequest){
- try{await authorized(req);return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
+ try{await authorized(req);const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
 }
 export async function POST(req:NextRequest){
  try{
  const actor=await authorized(req);const b=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
  if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).some(k=>!["paymentIntentId","amount","reason","requestId","expectedRefunded","confirmed"].includes(k)))throw new ApiError(400,"Invalid refund request");
  const id=paymentId(b.paymentIntentId),reason=str(b.reason,500);
- if(b.confirmed!==true||typeof b.requestId!=="string"||!(/^[a-f0-9-]{36}$/.test(b.requestId))||!Number.isSafeInteger(b.amount)||b.amount<=0||!Number.isSafeInteger(b.expectedRefunded)||b.expectedRefunded<0)throw new ApiError(400,"Invalid refund authorization");
+ if(b.confirmed!==true||typeof b.requestId!=="string"||!(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(b.requestId))||!Number.isSafeInteger(b.amount)||b.amount<=0||!Number.isSafeInteger(b.expectedRefunded)||b.expectedRefunded<0)throw new ApiError(400,"Invalid refund authorization");
  const fingerprint=createHash("sha256").update(JSON.stringify([actor,id,b.amount,reason,b.expectedRefunded])).digest("hex");
  const ref=db.collection("audit").doc("commercial-refund-"+b.requestId);
  const lock=db.collection("commercialRefundLocks").doc(id);
  const prior=await ref.get();
  if(prior.exists){
   if(prior.get("fingerprint")!==fingerprint)throw new ApiError(409,"Refund request conflict");
-  if(prior.get("stripeRefundId"))return ok({id:prior.get("stripeRefundId"),status:prior.get("stripeStatus"),amount:b.amount,replayed:true});
-  throw new ApiError(409,"Prior operation requires reconciliation; do not submit a new request");
+  return ok(await reconcile(requestIdentifier(b.requestId)));
  }
  const p=await review(id);
  if(p.refunded!==b.expectedRefunded||!validRefundAmount(b.amount,p.available))throw new ApiError(409,"Refund balance changed; review payment again");
