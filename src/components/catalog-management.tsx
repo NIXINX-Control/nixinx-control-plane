@@ -10,7 +10,7 @@ export type CatalogRow={
   graceDays?:number;modules?:string[];verified?:boolean;
 };
 export type CatalogData={
-  tenants:CatalogRow[];apps:CatalogRow[];modules:CatalogRow[];licenses:CatalogRow[];
+  tenants:CatalogRow[];apps:CatalogRow[];modules:CatalogRow[];licenses:CatalogRow[];canEditPrice?:boolean;
 };
 export type CatalogTab="tenants"|"apps"|"modules"|"licenses";
 
@@ -106,7 +106,7 @@ export default function CatalogManagement({
       }
       if(mode==="new"&&rows.some(r=>r.id===licenseId)){setError("Ya existe una licencia para este cliente y aplicación.");return;}
     }
-    if(tab==="apps"&&(!/^\d+(?:\.\d{1,2})?$/.test(draft.commercialPrice||"")||Number(draft.commercialPrice)<0.5||Number(draft.commercialPrice)>999999.99)){setError("Precio CAD inválido (mínimo 0.50).");return;}
+    if(tab==="apps"&&data.canEditPrice===true&&(!/^\d+(?:\.\d{1,2})?$/.test(draft.commercialPrice||"")||Number(draft.commercialPrice)<0.5||Number(draft.commercialPrice)>999999.99)){setError("Precio CAD inválido (mínimo 0.50).");return;}
     setBusy(true);
     try{
       if(mode==="new"){
@@ -117,7 +117,7 @@ export default function CatalogManagement({
           body.graceDays=Number(draft.graceDays||0);body.modules=selectedModules;
         }else{
           body.id=draft.id;body.name=draft.name;
-          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";if(data.canEditPrice===true)body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
           if(tab==="modules")body.appId=draft.appId;
         }
         await api("/api/admin","POST",body);
@@ -130,7 +130,7 @@ export default function CatalogManagement({
         }else{
           const path="/api/admin/catalog/"+tab+"/"+encodeURIComponent(editing.id);
           const body:Record<string,unknown>={name:draft.name,status:draft.status,reason};
-          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
+          if(tab==="apps"){body.description=draft.description||"";body.commercialPublished=draft.commercialPublished==="yes";if(data.canEditPrice===true)body.commercialPriceCents=Math.round(Number(draft.commercialPrice)*100);}
           if(tab==="tenants"&&draft.timeZone?.trim())body.timeZone=draft.timeZone;
           if(tab==="tenants"&&draft.serviceAction)body.serviceAction=draft.serviceAction;
           await api(path,"PATCH",body);
@@ -206,7 +206,7 @@ export default function CatalogManagement({
           {tab==="apps"&&<label className="field full">Descripción
             <input maxLength={300} value={draft.description||""} onChange={e=>set("description",e.target.value)}/>
           </label>}
-          {tab==="apps"&&<><label className="field full">Precio de prueba (CAD)<input required type="number" min="0.50" max="999999.99" step="0.01" value={draft.commercialPrice||"0.50"} onChange={e=>set("commercialPrice",e.target.value)}/></label><label className="row full"><input type="checkbox" checked={draft.commercialPublished==="yes"} onChange={e=>set("commercialPublished",e.target.checked?"yes":"no")}/> Vender en catálogo comercial / Stripe (pruebas)</label></>}
+          {tab==="apps"&&<><label className="field full">Precio de prueba (CAD)<input readOnly={data.canEditPrice!==true} required type="number" min="0.50" max="999999.99" step="0.01" value={draft.commercialPrice||"0.50"} onChange={e=>set("commercialPrice",e.target.value)}/>{data.canEditPrice!==true&&<small className="caption">Solo superadmin@nixinx.com puede modificar el precio.</small>}</label><label className="row full"><input type="checkbox" checked={draft.commercialPublished==="yes"} onChange={e=>set("commercialPublished",e.target.checked?"yes":"no")}/> Vender en catálogo comercial / Stripe (pruebas)</label></>}
           {tab==="tenants"&&mode==="edit"&&<>
             <label className="field">Zona horaria del cliente<input value={draft.timeZone||""} placeholder="America/Toronto" onChange={e=>set("timeZone",e.target.value)}/></label>
             <label className="field">Acceso para todas las aplicaciones

@@ -1,5 +1,5 @@
 import {NextRequest} from "next/server";
-import {adminUser,staffIdentity,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
+import {staffIdentity,db,ok,fail,identifier,str,ApiError} from "@/lib/server";
 import {inspectNewTenantIdentity} from "@/lib/tenant-identity-precheck";
 import {appModuleDocId,isNewCatalogId,normalizeSelectedModules,validateSelectedModules} from "@/lib/catalog";
 
@@ -8,19 +8,19 @@ export const dynamic="force-dynamic";
 
 export async function GET(req:NextRequest){
   try {
-    const {role}=await staffIdentity(req);
+    const {role,canEditPrice}=await staffIdentity(req);
     const sources=["tenants","apps","appModules","licenses","audit"] as const;
     const [tenants,apps,modules,licenses,logs]=await Promise.all(sources.map(async collection=>{
       const snap=await db.collection(collection).limit(collection==="audit"?50:500).get();
       return snap.docs.map(doc=>({id:doc.id,...doc.data()}));
     }));
-    return ok({tenants,apps,modules,licenses,logs,viewerRole:role});
+    return ok({tenants,apps,modules,licenses,logs,viewerRole:role,canEditPrice});
   }catch(error){return fail(error);}
 }
 
 export async function POST(req:NextRequest){
   try {
-    const actor=await adminUser(req);
+    const {uid:actor,canEditPrice}=await staffIdentity(req);
     const body=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
     if(!body||typeof body!=="object"||Array.isArray(body))throw new ApiError(400,"Invalid record");
     const kind=str(body.kind,30);
@@ -37,6 +37,7 @@ export async function POST(req:NextRequest){
     let record:Record<string,unknown>={};
     if(kind==="tenants")record={name:str(body.name),status:"active",createdAt:at};
     if(body.commercialPublished!==undefined&&(kind!=="apps"||typeof body.commercialPublished!=="boolean"))throw new ApiError(400,"Invalid commercial publication flag");
+    if(body.commercialPriceCents!==undefined&&!canEditPrice)throw new ApiError(403,"Commercial price requires superadmin@nixinx.com");
     if(body.commercialPriceCents!==undefined&&(kind!=="apps"||!Number.isSafeInteger(body.commercialPriceCents)||body.commercialPriceCents<50||body.commercialPriceCents>99999999))throw new ApiError(400,"Invalid CAD price");
     if(kind==="apps")record={name:str(body.name),description:typeof body.description==="string"?body.description.trim().slice(0,300):"",status:"active",commercialPublished:body.commercialPublished===true,commercialPriceCents:body.commercialPriceCents??50,createdAt:at};
     if(kind==="modules")record={appId,moduleId:id,name:str(body.name),status:"draft",verified:false,createdAt:at};

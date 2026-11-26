@@ -3,7 +3,7 @@ import {cert,getApps,initializeApp,applicationDefault} from "firebase-admin/app"
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {NextRequest} from "next/server";
-import {resolveStaffRole, type NixinxStaffRole} from "@/lib/staff-roles";
+import {resolveStaffRole, canEditCommercialPrice, type NixinxStaffRole} from "@/lib/staff-roles";
 import {configureKeylessControlADC,supplyVercelOidcForRequest} from "@/lib/keyless-google-credential";
 // Firebase Auth AND Cloud Firestore must use supported ADC credentials in keyless Preview.
 const useKeylessPreview=process.env.VERCEL_ENV==="preview"&&Boolean(process.env.NIXINX_CONTROL_WIF_PROVIDER);
@@ -19,7 +19,7 @@ export const adminApp=getApps()[0]??initializeApp(
 export const db=getFirestore(adminApp);
 export {FieldValue,Timestamp};
 export class ApiError extends Error {constructor(public status:number,message:string){super(message)}}
-export async function staffIdentity(req:NextRequest):Promise<{uid:string;role:NixinxStaffRole}>{
+export async function staffIdentity(req:NextRequest):Promise<{uid:string;role:NixinxStaffRole;canEditPrice:boolean}>{
  const bearer=req.headers.get("authorization")||"";
  if(!bearer.startsWith("Bearer "))throw new ApiError(401,"Authentication required");
  if(useKeylessPreview)supplyVercelOidcForRequest(req);
@@ -43,7 +43,7 @@ export async function staffIdentity(req:NextRequest):Promise<{uid:string;role:Ni
   console.warn("nixinx_staff_auth_denied",JSON.stringify({reason:"UID_NOT_ALLOWLISTED",preview:process.env.VERCEL_ENV==="preview",sandbox:process.env.FIREBASE_PROJECT_ID==="nixinx-control-sbx-26"}));
   throw new ApiError(403,"NIXINX administrator required");
  }
- return {uid:token.uid,role};
+ return {uid:token.uid,role,canEditPrice:canEditCommercialPrice(role,token.email,token.email_verified)};
 }
 export async function adminUser(req:NextRequest){return (await staffIdentity(req)).uid}
 export async function superadminUser(req:NextRequest){

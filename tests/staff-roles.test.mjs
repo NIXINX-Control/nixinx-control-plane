@@ -38,3 +38,11 @@ test("only superadmin can grant commercial payment exceptions",()=>{
   assert.equal(canGrantPaymentExemption("superadmin"),true);
   assert.equal(canGrantPaymentExemption(null),false);
 });
+
+const {canEditCommercialPrice}=await import("data:text/javascript;base64,"+Buffer.from(ts.transpileModule(fs.readFileSync(new URL("../src/lib/staff-roles.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText).toString("base64"));
+test("commercial pricing requires designated verified superadmin",()=>{
+ assert.equal(canEditCommercialPrice("superadmin","superadmin@nixinx.com",true),true);
+ for(const role of ["admin",null])assert.equal(canEditCommercialPrice(role,"superadmin@nixinx.com",true),false);
+ assert.equal(canEditCommercialPrice("superadmin","admin@nixinx.com",true),false);
+ assert.equal(canEditCommercialPrice("superadmin","superadmin@nixinx.com",false),false);
+});
