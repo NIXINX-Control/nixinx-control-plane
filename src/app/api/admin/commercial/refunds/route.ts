@@ -89,11 +89,25 @@ async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  if(notes.has_more||notes.data.some((n:any)=>n.object!=="credit_note"||n.invoice!==invoice.id))throw new ApiError(409,"Credit note history requires reconciliation");
  const existing=notes.data.filter((n:any)=>n.refund===refund.id);
  if(existing.length)throw new ApiError(409,"Existing linked credit note requires reconciliation; do not issue another");
- const preview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,amount:String(refund.amount),refund:refund.id,email_type:"none"}));
+ // Scope initial acceptance to one positive, undiscounted invoice line. Never invent a tax rate
+ // or credit a generic adjustment. For multi-line/discounted invoices require explicit allocation.
+ if(invoice.lines?.has_more!==false||!Array.isArray(invoice.lines.data)||invoice.lines.data.length!==1||!Array.isArray(invoice.total_discount_amounts)||invoice.total_discount_amounts.some((d:any)=>d.amount!==0)||invoice.shipping_cost)throw new ApiError(409,"Invoice requires line allocation review");
+ const line=invoice.lines.data[0];
+ if(!/^il_[A-Za-z0-9]+$/.test(line.id??"")||line.currency!=="cad"||!Number.isSafeInteger(line.amount)||line.amount<=0||!Array.isArray(line.tax_amounts)||line.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0||t.inclusive!==false||typeof t.tax_rate!=="string")||!Array.isArray(line.discount_amounts)||line.discount_amounts.some((d:any)=>d.amount!==0))throw new ApiError(409,"Invoice line requires tax allocation review");
+ const originalTax=line.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0);
+ if(!Number.isSafeInteger(originalTax)||invoice.tax!==originalTax||invoice.total!==line.amount+originalTax||invoice.total!==invoice.amount_paid)throw new ApiError(409,"Original invoice tax evidence mismatch");
+ // Estimate line amount from the original invoice's actual monetary split. Stripe alone
+ // determines the tax and final total; no local rate table, no adjustment or rounding fallback.
+ const lineAmount=Math.round(refund.amount*line.amount/invoice.total);
+ if(!Number.isSafeInteger(lineAmount)||lineAmount<=0||lineAmount>line.amount)throw new ApiError(409,"Refund requires line allocation review");
+ const preview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,"lines[0][type]":"invoice_line_item","lines[0][invoice_line_item]":line.id,"lines[0][amount]":String(lineAmount),refund:refund.id,email_type:"none"}));
+ if(preview.lines?.has_more!==false||preview.lines?.data?.length!==1||preview.lines.data[0].type!=="invoice_line_item"||preview.lines.data[0].invoice_line_item!==line.id||preview.total_excluding_tax!==lineAmount)throw new ApiError(409,"Stripe preview line mismatch");
+ if(originalTax>0&&refund.amount-lineAmount>0&&preview.total===preview.total_excluding_tax)throw new ApiError(409,"Expected tax credit missing from Stripe preview");
+ if(!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!line.tax_amounts.some((original:any)=>original.tax_rate===t.tax_rate)))throw new ApiError(409,"Stripe tax rate reference mismatch");
  if(preview.object!=="credit_note"||preview.invoice!==invoice.id||preview.customer!==p.customerId||preview.currency!=="cad"||preview.type!=="post_payment"||preview.total!==refund.amount||!Number.isSafeInteger(preview.total_excluding_tax)||preview.total_excluding_tax<0||preview.total_excluding_tax>preview.total||!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0)||preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==preview.total-preview.total_excluding_tax)throw new ApiError(409,"Stripe preview does not reconcile with existing refund and tax");
  if(preview.refund!==null&&preview.refund!==refund.id)throw new ApiError(409,"Preview refund reference mismatch");
  if((preview.out_of_band_amount??0)!==0||preview.customer_balance_transaction)throw new ApiError(409,"Unexpected credit allocation");
- return {requestId,invoiceNumber:invoice.number??null,currency:"cad",amount:preview.total,subtotal:preview.total_excluding_tax,tax:preview.total-preview.total_excluding_tax,refundId:refund.id,mode:"preview_only"};
+ return {requestId,invoiceNumber:invoice.number??null,currency:"cad",amount:preview.total,subtotal:preview.total_excluding_tax,tax:preview.total-preview.total_excluding_tax,refundId:refund.id,originalSubtotal:line.amount,originalTax,originalTotal:invoice.total,mode:"preview_only"};
 }
 export async function GET(req:NextRequest){
  try{await authorized(req);const creditRequest=req.nextUrl.searchParams.get("creditPreview");if(creditRequest!==null)return ok(await creditPreview(req,requestIdentifier(creditRequest),req.nextUrl.searchParams.get("acronym")??""));const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
