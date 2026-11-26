@@ -78,8 +78,25 @@ async function boundPayment(req:NextRequest,acronym:string,id:string,p:Awaited<R
  if(!/^in_[A-Za-z0-9]+$/.test(v.invoiceId??"")||!/^sub_[A-Za-z0-9]+$/.test(v.subscriptionId??"")||typeof v.orderId!=="string"||!v.orderId||v.orderId.length>200||v.customerId!==p.customerId||v.amount!==p.captured||v.currency!=="cad")throw new ApiError(409,"Commercial invoice binding mismatch");
  return {acronym,invoiceId:v.invoiceId as string,orderId:v.orderId as string,subscriptionId:v.subscriptionId as string};
 }
+async function creditPreview(req:NextRequest,requestId:string,acronym:string){
+ const record=(await db.collection("audit").doc("commercial-refund-"+requestId).get()).data();
+ if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox"||record.status!=="STRIPE_RECORDED"||record.stripeStatus!=="succeeded"||!/^re_[A-Za-z0-9]+$/.test(record.stripeRefundId??""))throw new ApiError(409,"Reconcile a successful existing refund first");
+ const id=paymentId(record.target),p=await review(id),binding=await boundPayment(req,acronym,id,p);
+ if(p.customerId!==record.customerId||p.chargeId!==record.chargeId||!Number.isSafeInteger(record.amount)||record.amount<=0||p.refunded<record.amount||(record.acronym&&record.acronym!==acronym)||(record.invoiceId&&record.invoiceId!==binding.invoiceId)||(record.orderId&&record.orderId!==binding.orderId)||(record.subscriptionId&&record.subscriptionId!==binding.subscriptionId))throw new ApiError(409,"Existing refund binding mismatch");
+ const [invoice,refund,notes]=await Promise.all([stripe("invoices/"+binding.invoiceId),stripe("refunds/"+record.stripeRefundId),stripe("credit_notes?"+new URLSearchParams({invoice:binding.invoiceId,limit:"100"}))]);
+ if(invoice.object!=="invoice"||invoice.id!==binding.invoiceId||invoice.customer!==p.customerId||invoice.payment_intent!==id||invoice.subscription!==binding.subscriptionId||invoice.status!=="paid"||invoice.currency!=="cad"||invoice.amount_paid!==p.captured)throw new ApiError(409,"Invoice evidence mismatch");
+ if(refund.object!=="refund"||refund.id!==record.stripeRefundId||refund.payment_intent!==id||refund.charge!==p.chargeId||refund.status!=="succeeded"||refund.amount!==record.amount||refund.currency!=="cad"||refund.metadata?.nixinx_request_id!==requestId||refund.metadata?.nixinx_owner!=="nixinx-commercial-sandbox-v1")throw new ApiError(409,"Refund evidence mismatch");
+ if(notes.has_more||notes.data.some((n:any)=>n.object!=="credit_note"||n.invoice!==invoice.id))throw new ApiError(409,"Credit note history requires reconciliation");
+ const existing=notes.data.filter((n:any)=>n.refund===refund.id);
+ if(existing.length)throw new ApiError(409,"Existing linked credit note requires reconciliation; do not issue another");
+ const preview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,amount:String(refund.amount),refund:refund.id,email_type:"none"}));
+ if(preview.object!=="credit_note"||preview.invoice!==invoice.id||preview.customer!==p.customerId||preview.currency!=="cad"||preview.type!=="post_payment"||preview.total!==refund.amount||!Number.isSafeInteger(preview.total_excluding_tax)||preview.total_excluding_tax<0||preview.total_excluding_tax>preview.total||!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0)||preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==preview.total-preview.total_excluding_tax)throw new ApiError(409,"Stripe preview does not reconcile with existing refund and tax");
+ if(preview.refund!==null&&preview.refund!==refund.id)throw new ApiError(409,"Preview refund reference mismatch");
+ if((preview.out_of_band_amount??0)!==0||preview.customer_balance_transaction)throw new ApiError(409,"Unexpected credit allocation");
+ return {requestId,invoiceNumber:invoice.number??null,currency:"cad",amount:preview.total,subtotal:preview.total_excluding_tax,tax:preview.total-preview.total_excluding_tax,refundId:refund.id,mode:"preview_only"};
+}
 export async function GET(req:NextRequest){
- try{await authorized(req);const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
+ try{await authorized(req);const creditRequest=req.nextUrl.searchParams.get("creditPreview");if(creditRequest!==null)return ok(await creditPreview(req,requestIdentifier(creditRequest),req.nextUrl.searchParams.get("acronym")??""));const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
  return ok(await commercialLookup(req,acronym));
  }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
 }
