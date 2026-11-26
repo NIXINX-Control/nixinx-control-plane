@@ -39,3 +39,12 @@ export function validateSelectedModules(
 export function acceptsCatalogStatus(kind:"tenants"|"apps"|"modules",status:unknown):boolean{
   return kind==="modules"?status==="draft"||status==="active"||status==="retired":status==="active"||status==="archived";
 }
+
+// New organization identity only. Existing catalog IDs and P03 contracts are unchanged.
+export const NEW_ORGANIZATION_ACRONYM_PATTERN="[a-z][a-z0-9]{1,34}";
+export function validNewOrganizationAcronym(value:unknown):value is string{
+ return typeof value==="string"&&value.length>=2&&value.length<=35&&/^[a-z]/.test(value)&&!/[^a-z0-9]/.test(value);
+}
+export function validOrganizationAcronymDraft(value:string):boolean{
+ return value===""||(value.length<=35&&/^[a-z]/.test(value)&&!/[^a-z0-9]/.test(value));
+}
