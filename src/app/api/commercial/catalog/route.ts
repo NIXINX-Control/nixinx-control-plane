@@ -8,8 +8,9 @@ async function published(){
  if(snapshot.size>500)throw Error("CATALOG_LIMIT");
  return snapshot.docs.flatMap(doc=>{
   const app=doc.data();
-  return app.status==="active"&&app.commercialPublished===true&&/^[a-z][a-z0-9-]{1,38}$/.test(doc.id)&&typeof app.name==="string"&&app.name.trim()
-   ?[{id:doc.id,name:app.name.trim().slice(0,120)}]:[];
+  const amount=app.commercialPriceCents??50;
+  return app.status==="active"&&app.commercialPublished===true&&/^[a-z][a-z0-9-]{1,38}$/.test(doc.id)&&Number.isSafeInteger(amount)&&amount>=50&&amount<=99999999&&typeof app.name==="string"&&app.name.trim()
+   ?[{id:doc.id,name:app.name.trim().slice(0,120),amount}]:[];
  }).sort((a,b)=>a.id.localeCompare(b.id));
 }
 export async function GET(){
