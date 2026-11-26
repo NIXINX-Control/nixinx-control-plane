@@ -72,17 +72,26 @@ export async function POST(req: NextRequest) {
     });
     const saved = (await ref.get()).data();
     if (saved?.planId !== planId || saved.applyAuthorized !== false) throw new ApiError(503,"INSTALLATION_PLAN_READBACK_FAILED");
-    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt,version:spec.version}});
+    return ok({...p, ...(target?{sourceCommit:target.sourceCommit,releaseTarget:target}:{}), durablePlan:{planId,created,status:saved.status,createdAt:saved.createdAt,version:spec.version,accessMode:spec.accessMode}});
   } catch (error) { return fail(error); }
 }
 
 export async function GET(req: NextRequest) {
   try {
     await superadminUser(req);
-    const snapshot = await scope(req).orderBy("createdAt","desc").limit(1).get();
+    if (process.env.VERCEL_ENV !== "production") throw new ApiError(409,"INSTALLATION_PLAN_SCOPE_INVALID");
+    const tenantId = req.nextUrl.searchParams.get("tenantId");
+    const requestedApp = req.nextUrl.searchParams.get("appId");
+    if (!tenantId || !/^[A-Za-z0-9_-]{2,80}$/.test(tenantId)) throw new ApiError(400,"TENANT_ID_INVALID");
+    const intake = db.collection("clientProvisioning").doc(tenantId);
+    const client = await intake.get();
+    if (!client.exists || client.get("tenantId") !== tenantId ||
+        (requestedApp !== null && client.get("appId") !== requestedApp)) return ok({durablePlan:null});
+    const snapshot = await intake.collection("installationPlans").orderBy("createdAt","desc").limit(1).get();
     const latest = snapshot.docs[0]?.data();
+    if (latest && (latest.tenantId !== tenantId || latest.appId !== client.get("appId"))) return ok({durablePlan:null});
     const execution = latest?.version === 2 ? (await snapshot.docs[0].ref.collection("execution").doc("runtime").get()).data() : undefined;
     const pilot = execution ? (await snapshot.docs[0].ref.collection("execution").doc("pilotOperator").get()).data() : undefined;
-    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt,version:latest.version,pilotEmail:pilot?.email??null,pilotStatus:pilot?.status??null,stagedAt:execution?.status==="STAGED_INACTIVE" ? execution.createdAt : null} : null});
+    return ok({durablePlan:latest ? {planId:latest.planId,status:latest.status,createdAt:latest.createdAt,version:latest.version,accessMode:latest.accessMode,pilotEmail:pilot?.email??null,pilotStatus:pilot?.status??null,stagedAt:execution?.status==="STAGED_INACTIVE" ? execution.createdAt : null} : null});
   } catch (error) { return fail(error); }
 }
