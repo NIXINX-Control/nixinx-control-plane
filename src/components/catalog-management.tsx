@@ -1,4 +1,5 @@
 "use client";
+import SearchableRecordSelector from "@/components/searchable-record-selector";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import type {User} from "firebase/auth";
 import {useTenantIdentityCheck,TenantIdentityInfo} from "@/components/tenant-identity-info";
@@ -168,25 +169,10 @@ export default function CatalogManagement({
       <h3 className="subheading">{mode==="edit"?"Editar":"Crear"} {tabLabel}</h3>
       <p className="caption">El identificador es la clave técnica permanente y nunca se renombra. El nombre visible sí puede editarse. Las bajas se archivan, no se eliminan físicamente.</p>
       <form className="fields" onSubmit={e=>{e.preventDefault();void save();}}>
-        {tab==="modules"&&<label className="field">Aplicación
-          <select required disabled={mode==="edit"||busy} value={draft.appId||""} onChange={e=>{set("appId",e.target.value);setSelectedModules([])}}>
-            <option value="">Selecciona una aplicación</option>
-            {apps.map(a=><option key={a.id} value={a.id}>{label(a)} ({a.id})</option>)}
-          </select>
-        </label>}
+        {tab==="modules"&&<SearchableRecordSelector required label="Aplicación" disabled={mode==="edit"||busy} value={draft.appId||""} options={apps.map(a=>({id:a.id,name:label(a)}))} onChange={v=>{set("appId",v);setSelectedModules([]);}}/>}
         {tab==="licenses"&&<>
-          <label className="field">Cliente
-            <select required disabled={mode==="edit"||busy} value={draft.tenantId||""} onChange={e=>set("tenantId",e.target.value)}>
-              <option value="">Selecciona</option>
-              {tenants.map(t=><option key={t.id} value={t.id}>{label(t)} ({t.id})</option>)}
-            </select>
-          </label>
-          <label className="field">Aplicación
-            <select required disabled={mode==="edit"||busy} value={draft.appId||""} onChange={e=>{set("appId",e.target.value);setSelectedModules([]);}}>
-              <option value="">Selecciona</option>
-              {apps.map(a=><option key={a.id} value={a.id}>{label(a)} ({a.id})</option>)}
-            </select>
-          </label>
+          <SearchableRecordSelector required label="Cliente técnico" disabled={mode==="edit"||busy} value={draft.tenantId||""} options={tenants.map(t=>({id:t.id,name:label(t)}))} onChange={v=>set("tenantId",v)}/>
+          <SearchableRecordSelector required label="Aplicación" disabled={mode==="edit"||busy} value={draft.appId||""} options={apps.map(a=>({id:a.id,name:label(a)}))} onChange={v=>{set("appId",v);setSelectedModules([]);}}/>
         </>}
         <label className="field">Identificador técnico (único, permanente)
           <input

@@ -117,7 +117,15 @@ async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  return {requestId,invoiceNumber:invoice.number??null,currency:"cad",amount:preview.total,subtotal:preview.total_excluding_tax,tax:preview.total-preview.total_excluding_tax,refundId:refund.id,originalSubtotal:line.amount,originalTax,originalTotal:invoice.total,mode:"preview_only"};
 }
 export async function GET(req:NextRequest){
- try{await authorized(req);const creditRequest=req.nextUrl.searchParams.get("creditPreview");if(creditRequest!==null)return ok(await creditPreview(req,requestIdentifier(creditRequest),req.nextUrl.searchParams.get("acronym")??""));const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
+ try{await authorized(req);if(req.nextUrl.searchParams.get("directory")==="1"){
+ const cursor=req.nextUrl.searchParams.get("cursor");
+ if(cursor!==null&&!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(cursor))throw new ApiError(400,"Invalid directory cursor");
+ const response=await fetch("https://nixinx.com/api/customer-portal/financial-lookup",{method:"POST",headers:{Authorization:req.headers.get("authorization")||"","Content-Type":"application/json"},body:JSON.stringify({directory:true,...(cursor?{cursor}:{})}),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(20000)});
+ if(!response.ok)throw new ApiError(503,"Directorio comercial no disponible");
+ const data=await response.json();
+ if(!Array.isArray(data.customers)||data.customers.length>100||data.customers.some((v:any)=>typeof v.acronym!=="string"||!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(v.acronym)||typeof v.company!=="string"||!v.company.trim()||v.company.length>150)||(data.cursor!==null&&(typeof data.cursor!=="string"||!data.customers.length||data.cursor!==data.customers.at(-1)?.acronym||data.cursor===cursor)))throw new ApiError(503,"Invalid commercial directory");
+ return ok({customers:data.customers.map((v:any)=>({acronym:v.acronym,company:v.company})),cursor:data.cursor});
+ }const creditRequest=req.nextUrl.searchParams.get("creditPreview");if(creditRequest!==null)return ok(await creditPreview(req,requestIdentifier(creditRequest),req.nextUrl.searchParams.get("acronym")??""));const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
  return ok(await commercialLookup(req,acronym));
  }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
 }
