@@ -34,3 +34,30 @@ export function validateIssuedCredit(note:any,refund:any,x:NativeCreditIntent){
  ensure(["succeeded","pending","requires_action","failed","canceled"].includes(refund.status),"Unknown refund status");
  return {creditNoteId:note.id,refundId:refund.id,status:refund.status,amount:x.amount};
 }
+
+/** Immutable authorization candidate. This does not reserve funds or issue Stripe mutations. */
+export type NativeCreditApproval={
+ requestId:string; acronym:string; invoiceId:string; paymentIntentId:string;
+ subtotal:number; tax:number; amount:number; expectedRefunded:number; confirmed:boolean; reason:string;
+};
+export type NativeCreditEvidence={
+ intent:NativeCreditIntent; acronym:string; orderId:string; subscriptionId:string;
+ available:number; refunded:number; blockers:string[]; allocationVerified:boolean;
+};
+export function prepareNativeCreditAuthorization(actor:string,approval:NativeCreditApproval,evidence:NativeCreditEvidence){
+ const x=evidence.intent;validateNativeCreditIntent(x);
+ ensure(typeof actor==="string"&&actor.trim().length>0&&actor.length<=200,"Invalid authorized actor");
+ ensure(approval?.confirmed===true&&typeof approval.reason==="string"&&approval.reason.trim().length>0&&approval.reason.length<=500,"Explicit authorization and reason required");
+ ensure(typeof evidence.acronym==="string"&&/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(evidence.acronym)&&typeof evidence.orderId==="string"&&evidence.orderId.length>0&&evidence.orderId.length<=200&&id(evidence.subscriptionId,"sub_"),"Invalid commercial binding");
+ ensure(approval.requestId===x.requestId&&approval.acronym===evidence.acronym&&approval.invoiceId===x.invoiceId&&approval.paymentIntentId===x.paymentIntentId,"Approved identity mismatch");
+ ensure(approval.subtotal===x.subtotal&&approval.tax===x.tax&&approval.amount===x.amount,"Approved fiscal amount changed");
+ ensure(cents(evidence.available)&&evidence.refunded===0&&approval.expectedRefunded===0&&x.amount<=evidence.available,"Payment balance or refund history changed");
+ ensure(evidence.allocationVerified===true&&Array.isArray(evidence.blockers)&&evidence.blockers.length===0,"Native allocation not verified");
+ const reason=approval.reason.trim();
+ const intent={...x,taxRateIds:[...x.taxRateIds].sort()};
+ const binding={acronym:evidence.acronym,orderId:evidence.orderId,subscriptionId:evidence.subscriptionId};
+ // Use the existing audit and payment lock. The caller must hash this canonical
+ // payload, reserve transactionally, and revalidate before any future execution.
+ const fingerprintPayload=JSON.stringify(["native-credit-v1",actor,reason,binding.acronym,binding.orderId,binding.subscriptionId,intent.invoiceId,intent.lineId,intent.paymentIntentId,intent.chargeId,intent.customerId,intent.requestId,intent.subtotal,intent.tax,intent.amount,intent.taxRateIds,approval.expectedRefunded,evidence.available]);
+ return {operation:"NATIVE_CREDIT_REFUND_V1" as const,environment:"sandbox" as const,actor,reason,target:intent.paymentIntentId,amount:intent.amount,expectedRefunded:approval.expectedRefunded,binding,intent,fingerprintPayload};
+}
