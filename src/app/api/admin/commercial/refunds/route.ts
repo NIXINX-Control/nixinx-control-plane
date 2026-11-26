@@ -100,35 +100,36 @@ async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  // determines the tax and final total; no local rate table, no adjustment or rounding fallback.
  const estimate=Math.round(refund.amount*line.amount/invoice.total);
  if(!Number.isSafeInteger(estimate)||estimate<=0||estimate>line.amount)throw new ApiError(409,"Refund requires line allocation review");
- async function previewLine(base:number){
-  const pview=await stripe("credit_notes/preview?"+new URLSearchParams({invoice:invoice.id,"lines[0][type]":"invoice_line_item","lines[0][invoice_line_item]":line.id,"lines[0][amount]":String(base),refund:refund.id,email_type:"none"}));
-  if(pview.lines?.has_more!==false||pview.lines?.data?.length!==1||pview.lines.data[0].type!=="invoice_line_item"||pview.lines.data[0].invoice_line_item!==line.id||pview.total_excluding_tax!==base)throw new ApiError(409,"Stripe preview line mismatch");
-  if(originalTax>0&&refund.amount-base>0&&pview.total===pview.total_excluding_tax)throw new ApiError(409,"Expected tax credit missing from Stripe preview");
-  if(!Array.isArray(pview.tax_amounts)||pview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0||!line.tax_amounts.some((original:any)=>original.tax_rate===t.tax_rate)))throw new ApiError(409,"Stripe tax rate reference mismatch");
-  if(pview.object!=="credit_note"||pview.invoice!==invoice.id||pview.customer!==invoice.customer||pview.currency!=="cad"||pview.type!=="post_payment"||!Number.isSafeInteger(pview.total)||pview.total<base||pview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==pview.total-base||(pview.refund!==null&&pview.refund!==refund.id)||(pview.out_of_band_amount??0)!==0||pview.customer_balance_transaction)throw new ApiError(409,"Stripe preview integrity mismatch");
-  return pview;
- }
- let preview=await previewLine(estimate);
- // Stripe rounds tax from original invoice evidence. Test at most one adjacent
- // integer line amount in the indicated direction. Do not modify tax or issue a note.
- if(preview.total!==refund.amount){
-  const next=estimate+(preview.total>refund.amount?-1:1);
-  if(next>0&&next<=line.amount){
-   const adjacent=await previewLine(next);
-   if(adjacent.total!==refund.amount)throw new ApiError(409,"No se encontró una distribución exacta (centavos CAD). Stripe: base "+estimate+", impuesto "+(preview.total-estimate)+", total "+preview.total+"; base "+next+", impuesto "+(adjacent.total-next)+", total "+adjacent.total+". Reembolso: "+refund.amount+". Revisión fiscal requerida. Sin emisión.");
-   preview=adjacent;
+ async function previewLine(base:number,linked:boolean){
+  const params=new URLSearchParams({invoice:invoice.id,"lines[0][type]":"invoice_line_item","lines[0][invoice_line_item]":line.id,"lines[0][amount]":String(base),email_type:"none"});
+  if(linked)params.set("refund",refund.id);
+  const v=await stripe("credit_notes/preview?"+params);
+  const taxes=Array.isArray(v.tax_amounts)&&v.tax_amounts.every((t:any)=>Number.isSafeInteger(t.amount)&&t.amount>=0&&line.tax_amounts.some((original:any)=>original.tax_rate===t.tax_rate))?v.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0):null;
+  const checks=[v.object==="credit_note"?"":"objeto",v.invoice===invoice.id?"":"factura",v.customer===invoice.customer?"":"cliente",v.currency==="cad"?"":"moneda",v.type==="post_payment"?"":"tipo",v.lines?.has_more===false&&v.lines?.data?.length===1&&v.lines.data[0].type==="invoice_line_item"&&v.lines.data[0].invoice_line_item===line.id?"":"línea",v.total_excluding_tax===base?"":"base",Number.isSafeInteger(v.total)&&v.total>=base?"":"total válido",taxes!==null&&taxes===v.total-base?"":"impuesto"].filter(Boolean);
+  if(originalTax>0&&refund.amount>base&&taxes===0)checks.push("impuesto esperado");
+  // A fiscal candidate has no allocation request. Stripe may represent the
+  // unallocated total as out-of-band in its preview. Never accept that as a linked credit.
+  if(linked){
+   if(v.total!==refund.amount)checks.push("total reembolso");
+   if(v.refund!==null&&v.refund!==refund.id)checks.push("referencia devolución");
+   if((v.out_of_band_amount??0)!==0)checks.push("fuera de Stripe");
+   if(v.customer_balance_transaction)checks.push("saldo cliente");
   }
+  if(checks.length)throw new ApiError(409,"Stripe "+(linked?"vinculación":"cálculo fiscal")+" no conciliado (centavos CAD). Base "+base+", impuesto "+(taxes??"no disponible")+", total "+(Number.isSafeInteger(v.total)?v.total:"no disponible")+". Reembolso "+refund.amount+". Validaciones: "+checks.join(", ")+". Sin emisión.");
+  return v;
  }
- if(preview.object!=="credit_note"||preview.invoice!==invoice.id||preview.customer!==p.customerId||preview.currency!=="cad"||preview.type!=="post_payment"||preview.total!==refund.amount||!Number.isSafeInteger(preview.total_excluding_tax)||preview.total_excluding_tax<0||preview.total_excluding_tax>preview.total||!Array.isArray(preview.tax_amounts)||preview.tax_amounts.some((t:any)=>!Number.isSafeInteger(t.amount)||t.amount<0)||preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==preview.total-preview.total_excluding_tax){
-  // Expose only authenticated, non-secret integer amounts and boolean guard results.
-  // This is a diagnosis, never a relaxed acceptance criterion.
-  const cents=(v:unknown)=>Number.isSafeInteger(v)?String(v):"no disponible";
-  const taxes=Array.isArray(preview.tax_amounts)&&preview.tax_amounts.every((t:any)=>Number.isSafeInteger(t.amount)&&t.amount>=0)?preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0):null;
-  const checks=[preview.object==="credit_note"?"":"objeto",preview.invoice===invoice.id?"":"factura",preview.customer===p.customerId?"":"cliente",preview.currency==="cad"?"":"moneda",preview.type==="post_payment"?"":"tipo",preview.total===refund.amount?"":"total",Number.isSafeInteger(preview.total_excluding_tax)&&preview.total_excluding_tax>=0&&preview.total_excluding_tax<=preview.total?"":"base",taxes!==null&&taxes===preview.total-preview.total_excluding_tax?"":"suma impuesto"].filter(Boolean);
-  throw new ApiError(409,"Previsualización no conciliada (centavos CAD). Factura original: base "+cents(line.amount)+", impuesto "+cents(originalTax)+", total "+cents(invoice.total)+". Stripe preview: base "+cents(preview.total_excluding_tax)+", impuesto "+cents(taxes)+", total "+cents(preview.total)+". Reembolso: "+cents(refund.amount)+". Validaciones: "+checks.join(", ")+". Sin emisión.");
+ // First determine the fiscal amount without asking Stripe to allocate a refund.
+ // Only a matching fiscal candidate may be previewed with the existing refund.
+ let candidate=await previewLine(estimate,false);
+ if(candidate.total!==refund.amount){
+  const next=estimate+(candidate.total>refund.amount?-1:1);
+  if(next<=0||next>line.amount)throw new ApiError(409,"No hay base adyacente válida. Revisión fiscal requerida. Sin emisión.");
+  const adjacent=await previewLine(next,false);
+  if(adjacent.total!==refund.amount)throw new ApiError(409,"No se encontró una distribución exacta (centavos CAD). Stripe: base "+estimate+", impuesto "+(candidate.total-estimate)+", total "+candidate.total+"; base "+next+", impuesto "+(adjacent.total-next)+", total "+adjacent.total+". Reembolso: "+refund.amount+". Revisión fiscal requerida. Sin emisión.");
+  candidate=adjacent;
  }
- if(preview.refund!==null&&preview.refund!==refund.id)throw new ApiError(409,"Preview refund reference mismatch");
- if((preview.out_of_band_amount??0)!==0||preview.customer_balance_transaction)throw new ApiError(409,"Unexpected credit allocation");
+ const preview=await previewLine(candidate.total_excluding_tax,true);
+ if(preview.total!==candidate.total||preview.total_excluding_tax!==candidate.total_excluding_tax||preview.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0)!==candidate.tax_amounts.reduce((sum:number,t:any)=>sum+t.amount,0))throw new ApiError(409,"Stripe changed fiscal amounts during refund linkage. Sin emisión.");
  return {requestId,invoiceNumber:invoice.number??null,currency:"cad",amount:preview.total,subtotal:preview.total_excluding_tax,tax:preview.total-preview.total_excluding_tax,refundId:refund.id,originalSubtotal:line.amount,originalTax,originalTotal:invoice.total,mode:"preview_only"};
 }
 export async function GET(req:NextRequest){
