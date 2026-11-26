@@ -26,3 +26,8 @@ export function canManageAdvanced(role: NixinxStaffRole | null): boolean {
 export function canGrantPaymentExemption(role: NixinxStaffRole | null): boolean {
   return role === "superadmin";
 }
+
+// Price authority requires both the UID allowlist role and the verified designated mailbox.
+export function canEditCommercialPrice(role:NixinxStaffRole|null,email:unknown,verified:unknown):boolean{
+ return role==="superadmin"&&verified===true&&email==="superadmin@nixinx.com";
+}
