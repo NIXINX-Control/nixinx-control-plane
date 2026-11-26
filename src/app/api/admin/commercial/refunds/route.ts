@@ -55,7 +55,13 @@ async function reconcile(requestId:string){
  return {id:refund.id,status:refund.status,amount:refund.amount,reconciled:true};
 }
 export async function GET(req:NextRequest){
- try{await authorized(req);const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
+ try{await authorized(req);const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
+ if(!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(acronym))throw new ApiError(400,"Invalid commercial acronym");
+ const response=await fetch("https://nixinx.com/api/customer-portal/financial-lookup",{method:"POST",headers:{Authorization:req.headers.get("authorization")||"","Content-Type":"application/json"},body:JSON.stringify({acronym}),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(20000)});
+ if(!response.ok)throw new ApiError(503,"Commercial payment lookup unavailable");
+ const data=await response.json();if(!Array.isArray(data.payments)||data.payments.length>100)throw new ApiError(503,"Invalid commercial payment lookup");
+ return ok(data);
+ }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
 }
 export async function POST(req:NextRequest){
  try{
