@@ -48,3 +48,8 @@ export function validNewOrganizationAcronym(value:unknown):value is string{
 export function validOrganizationAcronymDraft(value:string):boolean{
  return value===""||(value.length<=35&&/^[a-z]/.test(value)&&!/[^a-z0-9]/.test(value));
 }
+
+// Normalize ASCII case only; never transliterate or strip invalid characters.
+export function normalizeOrganizationAcronym(value:string):string{
+ return value.replace(/[A-Z]/g,char=>char.toLowerCase());
+}
