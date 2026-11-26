@@ -1,4 +1,5 @@
 "use client";
+import SearchableRecordSelector from "@/components/searchable-record-selector";
 import {useEffect,useRef,useState} from "react";
 import type {User} from "firebase/auth";
 import {assignedHostname} from "@/lib/tenant-configuration";
@@ -36,8 +37,8 @@ export default function Configurations({user,tenants,apps}:{user:User;tenants:It
     {error&&<p role="alert" className="error">{error}</p>}{message&&<p role="status" className="notice">{message}</p>}
     <section className="panel" ref={editorRef}><h3 className="subheading">{editing?"Editar borrador":"Nueva configuración"}</h3>
       <form className="fields" onSubmit={e=>{e.preventDefault();void save()}}>
-       <label className="field">Cliente<select required disabled={editing||busy} value={tenantId} onChange={e=>setTenant(e.target.value)}><option value="">Selecciona</option>{tenants.map(t=><option key={t.id} value={t.id}>{t.name||t.id}</option>)}</select></label>
-       <label className="field">Aplicación<select required disabled={editing||busy} value={appId} onChange={e=>setApp(e.target.value)}><option value="">Selecciona</option>{apps.map(a=><option key={a.id} value={a.id}>{a.name||a.id}</option>)}</select></label>
+       <SearchableRecordSelector required label="Cliente técnico" disabled={editing||busy} value={tenantId} options={tenants.map(t=>({id:t.id,name:t.name||t.id}))} onChange={setTenant}/>
+       <SearchableRecordSelector required label="Aplicación" disabled={editing||busy} value={appId} options={apps.map(a=>({id:a.id,name:a.name||a.id}))} onChange={setApp}/>
        <label className="field full">Dominio asignado<input readOnly value={hostname} placeholder="cliente.app.nixinx.app"/></label>
        {fields.map(({key,label})=><label className="field" key={key} style={{overflowWrap:"anywhere"}}>{label}<input required autoComplete="off" disabled={busy||(editing&&key==="projectId")} value={firebase[key]} onChange={e=>setFirebase(f=>({...f,[key]:e.target.value.trim()}))}/></label>)}
        <label className="field full">NEXT_PUBLIC_ORG_ID (opcional)<input autoComplete="off" disabled={busy} value={orgId} onChange={e=>setOrg(e.target.value.trim())}/></label>
