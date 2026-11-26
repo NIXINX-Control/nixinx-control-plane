@@ -1,5 +1,6 @@
 import {NextRequest} from "next/server";
-import {createHash} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
+import {nativeCreditForm,validateAllocatedCreditPreview} from "@/lib/commercial-credit-refund-policy";
 import {staffIdentity,db,ok,fail,ApiError,str} from "@/lib/server";
 import {refundablePayment,validRefundAmount} from "@/lib/commercial-refund-policy";
 export const runtime="nodejs";
@@ -107,7 +108,18 @@ async function prospectiveCredit(req:NextRequest,acronym:string,id:string,baseRa
  const blockers:string[]=[];
  if(p.refunded!==0||active.length!==0)blockers.push("Historial financiero requiere conciliación previa");
  if(!validRefundAmount(v.total,p.available))blockers.push("El total fiscal excede el saldo disponible");
- return {invoiceNumber:invoice.number??null,originalSubtotal:line.amount,originalTax,originalTotal:invoice.total,subtotal:base,tax,total:v.total,available:p.available,refunded:p.refunded,credited,blockers,mode:"fiscal_preview_only",issuanceEnabled:false};
+ // For an eligible clean invoice, also preview Stripe's native refund allocation.
+ // This is a GET only; no authorization, reservation, note or refund is created.
+ let allocationVerified=false;
+ if(blockers.length===0){
+  const intent={invoiceId:binding.invoiceId,lineId:line.id,paymentIntentId:id,chargeId:p.chargeId,customerId:p.customerId,requestId:randomUUID(),subtotal:base,tax,amount:v.total,taxRateIds:Array.from(new Set<string>(line.tax_amounts.map((t:any)=>t.tax_rate)))};
+  try{
+   const allocated=await stripe("credit_notes/preview?"+nativeCreditForm(intent));
+   validateAllocatedCreditPreview(allocated,intent);
+   allocationVerified=true;
+  }catch{blockers.push("Stripe no confirmó la asignación nativa del reembolso; no autorizar");}
+ }
+ return {invoiceNumber:invoice.number??null,originalSubtotal:line.amount,originalTax,originalTotal:invoice.total,subtotal:base,tax,total:v.total,available:p.available,refunded:p.refunded,credited,blockers,allocationVerified,mode:"fiscal_preview_only",issuanceEnabled:false};
 }
 async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  const record=(await db.collection("audit").doc("commercial-refund-"+requestId).get()).data();
