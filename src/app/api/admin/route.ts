@@ -37,7 +37,8 @@ export async function POST(req:NextRequest){
     let record:Record<string,unknown>={};
     if(kind==="tenants")record={name:str(body.name),status:"active",createdAt:at};
     if(body.commercialPublished!==undefined&&(kind!=="apps"||typeof body.commercialPublished!=="boolean"))throw new ApiError(400,"Invalid commercial publication flag");
-    if(kind==="apps")record={name:str(body.name),description:typeof body.description==="string"?body.description.trim().slice(0,300):"",status:"active",commercialPublished:body.commercialPublished===true,createdAt:at};
+    if(body.commercialPriceCents!==undefined&&(kind!=="apps"||!Number.isSafeInteger(body.commercialPriceCents)||body.commercialPriceCents<50||body.commercialPriceCents>99999999))throw new ApiError(400,"Invalid CAD price");
+    if(kind==="apps")record={name:str(body.name),description:typeof body.description==="string"?body.description.trim().slice(0,300):"",status:"active",commercialPublished:body.commercialPublished===true,commercialPriceCents:body.commercialPriceCents??50,createdAt:at};
     if(kind==="modules")record={appId,moduleId:id,name:str(body.name),status:"draft",verified:false,createdAt:at};
     let modules:string[]=[];
     if(kind==="licenses"){
