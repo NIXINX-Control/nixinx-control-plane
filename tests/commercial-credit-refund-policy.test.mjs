@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 const compiled=ts.transpileModule(fs.readFileSync(new URL("../src/lib/commercial-credit-refund-policy.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
+const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 const intent={invoiceId:"in_fixture",lineId:"il_fixture",paymentIntentId:"pi_fixture",chargeId:"ch_fixture",customerId:"cus_fixture",requestId:"11111111-1111-4111-8111-111111111111",subtotal:17,tax:2,amount:19,taxRateIds:["txr_fixture"]};
 const preview={object:"credit_note",livemode:false,invoice:intent.invoiceId,customer:intent.customerId,currency:"cad",type:"post_payment",total:19,total_excluding_tax:17,lines:{has_more:false,data:[{type:"invoice_line_item",invoice_line_item:intent.lineId}]},tax_amounts:[{amount:2,tax_rate:"txr_fixture"}],out_of_band_amount:0,customer_balance_transaction:null,refund:null};
 const issued={...preview,id:"cn_fixture",status:"issued",refund:"re_fixture",metadata:{nixinx_request_id:intent.requestId,nixinx_owner:"nixinx-commercial-sandbox-v1"}};
@@ -45,8 +45,8 @@ function transactionFixture(initial={}){
  const db={collection(name){return {doc(id){return name+"/"+id}}},runTransaction(fn){
   const job=queue.then(async()=>{
    const writes=new Map();
-   const tx={async get(ref){const value=data.get(ref);return {exists:value!==undefined,get(key){return value?.[key]}}},create(ref,value){if(data.has(ref)||writes.has(ref))throw Error("exists");writes.set(ref,value)}};
-   const result=await fn(tx);for(const [key,value] of writes)data.set(key,value);return result;
+   const tx={async get(ref){const value=data.get(ref);return {exists:value!==undefined,get(key){return value?.[key]}}},create(ref,value){if(data.has(ref)||writes.has(ref))throw Error("exists");writes.set(ref,value)},update(ref,value){if(!data.has(ref))throw Error("missing");writes.set(ref,{...data.get(ref),...value})},delete(ref){writes.set(ref,undefined)}};
+   const result=await fn(tx);for(const [key,value] of writes){if(value===undefined)data.delete(key);else data.set(key,value);}return result;
   });queue=job.catch(()=>{});return job;
  }};
  return {db,data};
@@ -75,4 +75,55 @@ test("competing native and legacy reservations fail closed without changing exis
  const legacy=transactionFixture({"commercialRefundLocks/pi_fixture":{requestId:"legacy"}});
  await assert.rejects(()=>reserveNativeCreditAuthorization(legacy.db,"staff_fixture",approval,evidence),/reconciliation required/);
  assert.equal(legacy.data.size,1);assert.equal(legacy.data.get("commercialRefundLocks/pi_fixture").requestId,"legacy");
+});
+
+const binding={acronym:evidence.acronym,orderId:evidence.orderId,subscriptionId:evidence.subscriptionId,invoiceId:intent.invoiceId,paymentIntentId:intent.paymentIntentId,chargeId:intent.chargeId,customerId:intent.customerId,captured:57,refunded:19};
+const invoice={object:"invoice",livemode:false,id:intent.invoiceId,customer:intent.customerId,payment_intent:intent.paymentIntentId,subscription:evidence.subscriptionId,currency:"cad",status:"paid",amount_paid:57};
+function stripeFixture({notes=[issued],note=issued,returnedRefund=refund,returnedInvoice=invoice}={}){
+ return async path=>{
+  if(path==="invoices/"+intent.invoiceId)return returnedInvoice;
+  if(path.startsWith("credit_notes?"))return {object:"list",has_more:false,data:notes};
+  if(path==="credit_notes/"+issued.id)return note;
+  if(path==="refunds/"+refund.id)return returnedRefund;
+  throw Error("Unexpected Stripe read");
+ };
+}
+async function authorizedFixture(){
+ const {db,data}=transactionFixture();
+ await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence);
+ const key="audit/commercial-refund-"+intent.requestId;
+ data.set(key,{...data.get(key),status:"AUTHORIZED"});
+ return {db,data,key,lock:"commercialRefundLocks/"+intent.paymentIntentId};
+}
+test("reconciliation discovers an ambiguous response by request metadata and records both Stripe references once",async()=>{
+ const {db,data,key,lock}=await authorizedFixture();
+ const r=await reconcileNativeCredit(db,intent.requestId,binding,stripeFixture());
+ assert.equal(r.status,"succeeded");assert.equal(r.lockRetained,false);assert.equal(data.has(lock),false);
+ assert.equal(data.get(key).stripeCreditNoteId,issued.id);assert.equal(data.get(key).stripeRefundId,refund.id);
+ assert.equal((await reconcileNativeCredit(db,intent.requestId,binding,stripeFixture())).status,"succeeded");
+ await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,{...binding,refunded:0},stripeFixture({returnedRefund:{...refund,status:"pending"}})),/terminal status conflict/);
+});
+test("missing, duplicate, inconsistent or unconfirmed credit evidence retains existing lock",async()=>{
+ for(const opts of [{notes:[]},{notes:[issued,issued]},{note:{...issued,total:20}},{returnedRefund:{...refund,charge:"ch_other"}},{returnedInvoice:{...invoice,customer:"cus_other"}}]){
+  const {db,data,key,lock}=await authorizedFixture();
+  await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,binding,stripeFixture(opts)));
+  assert.equal(data.get(key).status,"AUTHORIZED");assert.equal(data.has(lock),true);
+ }
+ const {db,data,key,lock}=await authorizedFixture();
+ await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,{...binding,refunded:0},stripeFixture()),/Charge refund readback/);
+ assert.equal(data.get(key).status,"AUTHORIZED");assert.equal(data.has(lock),true);
+});
+test("pending or failed refund records both references but retains fiscal lock",async()=>{
+ for(const status of ["pending","requires_action","failed","canceled"]){
+  const {db,data,key,lock}=await authorizedFixture();
+  const r=await reconcileNativeCredit(db,intent.requestId,{...binding,refunded:0},stripeFixture({returnedRefund:{...refund,status}}));
+  assert.equal(r.lockRetained,true);assert.equal(data.has(lock),true);assert.equal(data.get(key).stripeStatus,status);
+ }
+});
+test("reconciliation refuses a validating-only reservation or a wrong commercial binding",async()=>{
+ const {db,data,key,lock}=await authorizedFixture();
+ await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,{...binding,acronym:"org"},stripeFixture()),/binding mismatch/);
+ data.set(key,{...data.get(key),status:"VALIDATING"});
+ await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,binding,stripeFixture()),/not executable/);
+ assert.equal(data.has(lock),true);
 });
