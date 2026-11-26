@@ -75,6 +75,7 @@ export async function POST(req:NextRequest){
  const prior=await ref.get();
  if(prior.exists){
   if(prior.get("fingerprint")!==fingerprint)throw new ApiError(409,"Refund request conflict");
+  if(prior.get("status")==="REJECTED_BEFORE_EXECUTION")throw new ApiError(409,"Authorization rejected before execution; review payment again");
   return ok(await reconcile(requestIdentifier(b.requestId)));
  }
  const p=await review(id);
@@ -82,8 +83,27 @@ export async function POST(req:NextRequest){
  await db.runTransaction(async tx=>{
   const [old,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
   if(old.exists||active.exists)throw new ApiError(409,"Refund in progress or reconciliation required");
-  tx.create(ref,{actor,action:"COMMERCIAL_REFUND",target:id,customerId:p.customerId,chargeId:p.chargeId,amount:b.amount,currency:"cad",reason,fingerprint,status:"AUTHORIZED",environment:"sandbox",at:new Date().toISOString()});
+  tx.create(ref,{actor,action:"COMMERCIAL_REFUND",target:id,customerId:p.customerId,chargeId:p.chargeId,amount:b.amount,currency:"cad",reason,fingerprint,status:"VALIDATING",environment:"sandbox",at:new Date().toISOString()});
   tx.create(lock,{requestId:b.requestId,at:new Date().toISOString()});
+ });
+ // Re-read under the durable lock: a competing refund may have completed after the first review.
+ let latest:Awaited<ReturnType<typeof review>>;
+ try{
+  latest=await review(id);
+  if(latest.chargeId!==p.chargeId||latest.customerId!==p.customerId||latest.refunded!==b.expectedRefunded||!validRefundAmount(b.amount,latest.available))throw new ApiError(409,"Refund balance changed; review payment again");
+ }catch(error){
+  // No Stripe mutation has been attempted. Release only our own validation lock.
+  await db.runTransaction(async tx=>{
+   const [current,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+   if(current.get("status")!=="VALIDATING"||active.get("requestId")!==b.requestId)throw new ApiError(409,"Refund validation lock mismatch");
+   tx.update(ref,{status:"REJECTED_BEFORE_EXECUTION",completedAt:new Date().toISOString()});tx.delete(lock);
+  });
+  throw error;
+ }
+ await db.runTransaction(async tx=>{
+  const [current,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  if(current.get("status")!=="VALIDATING"||active.get("requestId")!==b.requestId)throw new ApiError(409,"Refund validation lock mismatch");
+  tx.update(ref,{status:"AUTHORIZED",authorizedAt:new Date().toISOString()});
  });
  // Any ambiguous response keeps the lock and audit intent; never retry with a new key.
  const refund=await stripe("refunds",new URLSearchParams({payment_intent:id,amount:String(b.amount),"metadata[nixinx_request_id]":b.requestId,"metadata[nixinx_owner]":"nixinx-commercial-sandbox-v1"}),"nx-refund-"+b.requestId);
