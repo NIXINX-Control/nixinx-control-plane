@@ -38,6 +38,7 @@ async function reconcile(requestId:string){
  const ref=db.collection("audit").doc("commercial-refund-"+requestId);
  const snap=await ref.get(),record=snap.data();
  if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox")throw new ApiError(404,"Refund authorization not found");
+ if(record.operation!==undefined)throw new ApiError(409,"Native credit authorization requires its own reconciliation; do not create another request.");
  const id=paymentId(record.target),lock=db.collection("commercialRefundLocks").doc(id);
  const intent=await stripe("payment_intents/"+id);
  if(intent.id!==id||intent.customer!==record.customerId||intent.latest_charge!==record.chargeId||!/^ch_[A-Za-z0-9]+$/.test(record.chargeId))throw new ApiError(409,"Refund payment evidence mismatch");
@@ -129,7 +130,7 @@ async function prospectiveCredit(req:NextRequest,acronym:string,id:string,baseRa
 }
 async function creditPreview(req:NextRequest,requestId:string,acronym:string){
  const record=(await db.collection("audit").doc("commercial-refund-"+requestId).get()).data();
- if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox"||record.status!=="STRIPE_RECORDED"||record.stripeStatus!=="succeeded"||!/^re_[A-Za-z0-9]+$/.test(record.stripeRefundId??""))throw new ApiError(409,"Reconcile a successful existing refund first");
+ if(!record||record.action!=="COMMERCIAL_REFUND"||record.operation!==undefined||record.environment!=="sandbox"||record.status!=="STRIPE_RECORDED"||record.stripeStatus!=="succeeded"||!/^re_[A-Za-z0-9]+$/.test(record.stripeRefundId??""))throw new ApiError(409,"Reconcile a successful existing refund first");
  const id=paymentId(record.target),p=await review(id),binding=await boundPayment(req,acronym,id,p);
  if(p.customerId!==record.customerId||p.chargeId!==record.chargeId||!Number.isSafeInteger(record.amount)||record.amount<=0||p.refunded<record.amount||(record.acronym&&record.acronym!==acronym)||(record.invoiceId&&record.invoiceId!==binding.invoiceId)||(record.orderId&&record.orderId!==binding.orderId)||(record.subscriptionId&&record.subscriptionId!==binding.subscriptionId))throw new ApiError(409,"Existing refund binding mismatch");
  const [invoice,refund,notes]=await Promise.all([stripe("invoices/"+binding.invoiceId),stripe("refunds/"+record.stripeRefundId),stripe("credit_notes?"+new URLSearchParams({invoice:binding.invoiceId,limit:"100"}))]);

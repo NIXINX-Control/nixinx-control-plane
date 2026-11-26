@@ -1,3 +1,5 @@
+import {createHash} from "node:crypto";
+import type {Firestore} from "firebase-admin/firestore";
 // Stripe is the fiscal authority. All monetary values are integer CAD cents.
 export type NativeCreditIntent={invoiceId:string;lineId:string;paymentIntentId:string;chargeId:string;customerId:string;requestId:string;subtotal:number;tax:number;amount:number;taxRateIds:string[]};
 const id=(v:unknown,prefix:string):v is string=>typeof v==="string"&&v.startsWith(prefix)&&/^[A-Za-z0-9_]+$/.test(v);
@@ -60,4 +62,33 @@ export function prepareNativeCreditAuthorization(actor:string,approval:NativeCre
  // payload, reserve transactionally, and revalidate before any future execution.
  const fingerprintPayload=JSON.stringify(["native-credit-v1",actor,reason,binding.acronym,binding.orderId,binding.subscriptionId,intent.invoiceId,intent.lineId,intent.paymentIntentId,intent.chargeId,intent.customerId,intent.requestId,intent.subtotal,intent.tax,intent.amount,intent.taxRateIds,approval.expectedRefunded,evidence.available]);
  return {operation:"NATIVE_CREDIT_REFUND_V1" as const,environment:"sandbox" as const,actor,reason,target:intent.paymentIntentId,amount:intent.amount,expectedRefunded:approval.expectedRefunded,binding,intent,fingerprintPayload};
+}
+
+/** Server-side only. Reserve in existing audit and payment lock atomically.
+ * The caller must authenticate the actor and fetch fresh Stripe evidence before
+ * calling; a reservation never authorizes a Stripe write by itself.
+ * Existing reservations are reconciliation-only; never send a new mutation on replay.
+ */
+export async function reserveNativeCreditAuthorization(db:Firestore,actor:string,approval:NativeCreditApproval,evidence:NativeCreditEvidence){
+ const candidate=prepareNativeCreditAuthorization(actor,approval,evidence);
+ const {intent,binding}=candidate;
+ const fingerprint=createHash("sha256").update(candidate.fingerprintPayload).digest("hex");
+ const ref=db.collection("audit").doc("commercial-refund-"+intent.requestId);
+ const lock=db.collection("commercialRefundLocks").doc(intent.paymentIntentId);
+ const at=new Date().toISOString();
+ return db.runTransaction(async tx=>{
+  const [old,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  if(old.exists){
+   ensure(old.get("action")==="COMMERCIAL_REFUND"&&old.get("operation")===candidate.operation&&old.get("environment")==="sandbox"&&old.get("fingerprint")===fingerprint&&old.get("target")===intent.paymentIntentId&&old.get("requestId")===intent.requestId,"Refund authorization conflict");
+   // No lock can be recreated or reassigned on replay, even after a crash.
+   if(old.get("status")==="VALIDATING"||old.get("status")==="AUTHORIZED"){
+    ensure(active.exists&&active.get("requestId")===intent.requestId&&active.get("fingerprint")===fingerprint&&active.get("operation")===candidate.operation,"Refund lock mismatch");
+   }
+   return {disposition:"RECONCILE_ONLY" as const,requestId:intent.requestId,fingerprint};
+  }
+  ensure(!active.exists,"Refund in progress or reconciliation required");
+  tx.create(ref,{actor:candidate.actor,action:"COMMERCIAL_REFUND",operation:candidate.operation,target:candidate.target,requestId:intent.requestId,customerId:intent.customerId,chargeId:intent.chargeId,amount:intent.amount,currency:"cad",reason:candidate.reason,fingerprint,status:"VALIDATING",environment:"sandbox",at,expectedRefunded:candidate.expectedRefunded,acronym:binding.acronym,orderId:binding.orderId,subscriptionId:binding.subscriptionId,invoiceId:intent.invoiceId,creditIntent:intent});
+  tx.create(lock,{requestId:intent.requestId,operation:candidate.operation,fingerprint,at});
+  return {disposition:"RESERVED" as const,requestId:intent.requestId,fingerprint};
+ });
 }
