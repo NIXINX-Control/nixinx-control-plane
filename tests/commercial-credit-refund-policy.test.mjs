@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 const compiled=ts.transpileModule(fs.readFileSync(new URL("../src/lib/commercial-credit-refund-policy.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
+const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce,parseNativeCreditPreflight,nativeCreditReplayStatus}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 const intent={invoiceId:"in_fixture",lineId:"il_fixture",paymentIntentId:"pi_fixture",chargeId:"ch_fixture",customerId:"cus_fixture",requestId:"11111111-1111-4111-8111-111111111111",subtotal:17,tax:2,amount:19,taxRateIds:["txr_fixture"]};
 const preview={object:"credit_note",livemode:false,invoice:intent.invoiceId,customer:intent.customerId,currency:"cad",type:"post_payment",total:19,total_excluding_tax:17,lines:{has_more:false,data:[{type:"invoice_line_item",invoice_line_item:intent.lineId}]},tax_amounts:[{amount:2,tax_rate:"txr_fixture"}],out_of_band_amount:0,customer_balance_transaction:null,refund:null};
 const issued={...preview,id:"cn_fixture",status:"issued",refund:"re_fixture",metadata:{nixinx_request_id:intent.requestId,nixinx_owner:"nixinx-commercial-sandbox-v1"}};
@@ -166,4 +166,20 @@ test("lock change during revalidation never authorizes or deletes a competing lo
  await assert.rejects(()=>executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>{data.set(lock,{requestId:"foreign"});return evidence;},async()=>{calls++;}),/lock mismatch/);
  assert.equal(calls,0);assert.equal(data.get(lock).requestId,"foreign");
  assert.equal(data.get("audit/commercial-refund-"+intent.requestId).status,"VALIDATING");
+});
+
+test("preflight HTTP contract is strict and cannot request execution",()=>{
+ const body={action:"native-preflight",...approval};
+ assert.deepEqual(parseNativeCreditPreflight(body),approval);
+ for(const changes of [{action:"execute"},{unexpected:true},{confirmed:false},{reason:" "},{amount:20},{subtotal:"17"},{acronym:"../org"},{expectedRefunded:1}])assert.throws(()=>parseNativeCreditPreflight({...body,...changes}));
+});
+test("existing native replay checks persisted approval without requesting a new quote",async()=>{
+ const {db,data}=transactionFixture();await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence);
+ const row=data.get("audit/commercial-refund-"+intent.requestId);
+ for(const status of ["VALIDATING","AUTHORIZED","STRIPE_RECORDED","REJECTED_BEFORE_EXECUTION"]){
+  assert.equal(nativeCreditReplayStatus("staff_fixture",approval,{...row,status}).status,status);
+ }
+ assert.throws(()=>nativeCreditReplayStatus("other_actor",approval,row));
+ assert.throws(()=>nativeCreditReplayStatus("staff_fixture",{...approval,amount:20},row));
+ assert.throws(()=>nativeCreditReplayStatus("staff_fixture",approval,{...row,operation:undefined}));
 });
