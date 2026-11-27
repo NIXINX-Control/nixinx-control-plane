@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 const compiled=ts.transpileModule(fs.readFileSync(new URL("../src/lib/commercial-credit-refund-policy.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce,parseNativeCreditPreflight,nativeCreditReplayStatus}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
+const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce,parseNativeCreditPreflight,nativeCreditReplayStatus,abandonNativeValidatingReservation}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 const intent={invoiceId:"in_fixture",lineId:"il_fixture",paymentIntentId:"pi_fixture",chargeId:"ch_fixture",customerId:"cus_fixture",requestId:"11111111-1111-4111-8111-111111111111",subtotal:17,tax:2,amount:19,taxRateIds:["txr_fixture"]};
 const preview={object:"credit_note",livemode:false,invoice:intent.invoiceId,customer:intent.customerId,currency:"cad",type:"post_payment",total:19,total_excluding_tax:17,lines:{has_more:false,data:[{type:"invoice_line_item",invoice_line_item:intent.lineId}]},tax_amounts:[{amount:2,tax_rate:"txr_fixture"}],out_of_band_amount:0,customer_balance_transaction:null,refund:null};
 const issued={...preview,id:"cn_fixture",status:"issued",refund:"re_fixture",metadata:{nixinx_request_id:intent.requestId,nixinx_owner:"nixinx-commercial-sandbox-v1"}};
@@ -45,7 +45,7 @@ function transactionFixture(initial={}){
  const db={collection(name){return {doc(id){return name+"/"+id}}},runTransaction(fn){
   const job=queue.then(async()=>{
    const writes=new Map();
-   const tx={async get(ref){const value=data.get(ref);return {exists:value!==undefined,get(key){return value?.[key]}}},create(ref,value){if(data.has(ref)||writes.has(ref))throw Error("exists");writes.set(ref,value)},update(ref,value){if(!data.has(ref))throw Error("missing");writes.set(ref,{...data.get(ref),...value})},delete(ref){writes.set(ref,undefined)}};
+   const tx={async get(ref){const value=data.get(ref);return {exists:value!==undefined,get(key){return value?.[key]},data(){return value}}},create(ref,value){if(data.has(ref)||writes.has(ref))throw Error("exists");writes.set(ref,value)},update(ref,value){if(!data.has(ref))throw Error("missing");writes.set(ref,{...data.get(ref),...value})},delete(ref){writes.set(ref,undefined)}};
    const result=await fn(tx);for(const [key,value] of writes){if(value===undefined)data.delete(key);else data.set(key,value);}return result;
   });queue=job.catch(()=>{});return job;
  }};
@@ -182,4 +182,51 @@ test("existing native replay checks persisted approval without requesting a new 
  assert.throws(()=>nativeCreditReplayStatus("other_actor",approval,row));
  assert.throws(()=>nativeCreditReplayStatus("staff_fixture",{...approval,amount:20},row));
  assert.throws(()=>nativeCreditReplayStatus("staff_fixture",approval,{...row,operation:undefined}));
+});
+
+test("explicit recovery abandons VALIDATING only and preserves durable audit",async()=>{
+ const {db,data}=transactionFixture();await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence);
+ const audit="audit/commercial-refund-"+intent.requestId,lock="commercialRefundLocks/"+intent.paymentIntentId;
+ const result=await abandonNativeValidatingReservation(db,"staff_fixture",approval,"Interrupted validation");
+ assert.equal(result.disposition,"ABANDONED_BEFORE_EXECUTION");assert.equal(result.issuanceEnabled,false);
+ assert.equal(data.get(audit).status,"REJECTED_BEFORE_EXECUTION");assert.equal(data.get(audit).recoveryReason,"Interrupted validation");assert.equal(data.has(lock),false);
+ assert.equal((await abandonNativeValidatingReservation(db,"staff_fixture",approval,"Interrupted validation")).disposition,"ALREADY_REJECTED");
+ assert.equal((await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence)).disposition,"RECONCILE_ONLY");
+});
+test("recovery rejects authorized, recorded, mismatched and transport-marked reservations without unlocking",async()=>{
+ const audit="audit/commercial-refund-"+intent.requestId,lock="commercialRefundLocks/"+intent.paymentIntentId;
+ for(const changes of [{status:"AUTHORIZED"},{status:"STRIPE_RECORDED"},{idempotencyKey:"nx-credit-test"},{authorizedAt:"timestamp"},{stripeRefundId:"re_fixture"},{stripeCreditNoteId:"cn_fixture"},{stripeStatus:"pending"}]){
+  const {db,data}=transactionFixture();await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence);
+  data.set(audit,{...data.get(audit),...changes});
+  await assert.rejects(()=>abandonNativeValidatingReservation(db,"staff_fixture",approval,"Recovery"));assert.equal(data.has(lock),true);
+ }
+ const {db,data}=transactionFixture();await reserveNativeCreditAuthorization(db,"staff_fixture",approval,evidence);
+ await assert.rejects(()=>abandonNativeValidatingReservation(db,"other_actor",approval,"Recovery"));
+ await assert.rejects(()=>abandonNativeValidatingReservation(db,"staff_fixture",{...approval,confirmed:false},"Recovery"));
+ await assert.rejects(()=>abandonNativeValidatingReservation(db,"staff_fixture",approval," "));
+ data.set(lock,{...data.get(lock),fingerprint:"different"});
+ await assert.rejects(()=>abandonNativeValidatingReservation(db,"staff_fixture",approval,"Recovery"));
+ assert.equal(data.get(audit).status,"VALIDATING");assert.equal(data.get(lock).fingerprint,"different");
+});
+test("recovery winning during refresh fences original execution and leaves successor lock intact",async()=>{
+ const {db,data}=transactionFixture();let writes=0;
+ const secondId="22222222-2222-4222-8222-222222222222";
+ const secondApproval={...approval,requestId:secondId},secondEvidence={...evidence,intent:{...intent,requestId:secondId}};
+ await assert.rejects(()=>executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>{
+  await abandonNativeValidatingReservation(db,"staff_fixture",approval,"Interrupted validation");
+  await reserveNativeCreditAuthorization(db,"staff_fixture",secondApproval,secondEvidence);
+  return evidence;
+ },async()=>{writes++}));
+ assert.equal(writes,0);assert.equal(data.get("commercialRefundLocks/"+intent.paymentIntentId).requestId,secondId);
+ assert.equal(data.get("audit/commercial-refund-"+intent.requestId).status,"REJECTED_BEFORE_EXECUTION");
+ assert.equal((await abandonNativeValidatingReservation(db,"staff_fixture",approval,"Interrupted validation")).disposition,"ALREADY_REJECTED");
+ assert.equal(data.get("commercialRefundLocks/"+intent.paymentIntentId).requestId,secondId);
+});
+test("authorization winning first prevents recovery and retains the lock after ambiguous transport",async()=>{
+ const {db,data}=transactionFixture();let writes=0;
+ const result=await executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>evidence,async()=>{
+  writes++;await assert.rejects(()=>abandonNativeValidatingReservation(db,"staff_fixture",approval,"Recovery"),/reconcile only/);throw Error("timeout");
+ });
+ assert.equal(result.disposition,"RECONCILE_REQUIRED");assert.equal(writes,1);
+ assert.equal(data.get("audit/commercial-refund-"+intent.requestId).status,"AUTHORIZED");assert.equal(data.has("commercialRefundLocks/"+intent.paymentIntentId),true);
 });

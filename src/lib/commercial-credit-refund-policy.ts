@@ -227,3 +227,32 @@ export function nativeCreditReplayStatus(actor:string,approval:NativeCreditAppro
  ensure(["VALIDATING","AUTHORIZED","STRIPE_RECORDED","REJECTED_BEFORE_EXECUTION"].includes(record.status),"Unknown credit state");
  return {disposition:"EXISTING_REQUEST" as const,requestId:approval.requestId,status:record.status as string,issuanceEnabled:false};
 }
+
+/** Explicit abandonment of a pre-transport reservation, never a Stripe retry.
+ * The caller must authenticate the superadmin and confirm the exact request.
+ * No time-based expiry: the transaction fences even a still-running validator.
+ * If AUTHORIZED wins the race, the payment remains locked for reconciliation.
+ */
+export async function abandonNativeValidatingReservation(db:Firestore,actor:string,approval:NativeCreditApproval,recoveryReason:string){
+ ensure(typeof actor==="string"&&actor.trim().length>0&&actor.length<=200&&approval.confirmed===true&&typeof recoveryReason==="string"&&recoveryReason.trim().length>0&&recoveryReason.length<=500,"Explicit recovery confirmation and reason required");
+ ensure(typeof approval.requestId==="string"&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(approval.requestId)&&id(approval.paymentIntentId,"pi_"),"Invalid recovery identity");
+ const ref=db.collection("audit").doc("commercial-refund-"+approval.requestId);
+ const lock=db.collection("commercialRefundLocks").doc(approval.paymentIntentId);
+ return db.runTransaction(async tx=>{
+  const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);
+  ensure(record.exists,"Native reservation not found");
+  const row=record.data()!;
+  nativeCreditReplayStatus(actor,approval,row);
+  ensure(row.status==="VALIDATING"||row.status==="REJECTED_BEFORE_EXECUTION","Authorization may have reached Stripe; reconcile only");
+  ensure(typeof row.fingerprint==="string"&&/^[a-f0-9]{64}$/.test(row.fingerprint)&&row.expectedRefunded===0&&row.currency==="cad"&&row.chargeId===row.creditIntent.chargeId&&row.customerId===row.creditIntent.customerId,"Invalid reservation evidence");
+  ensure(row.authorizedAt===undefined&&row.idempotencyKey===undefined&&row.stripeCreditNoteId===undefined&&row.stripeRefundId===undefined&&row.stripeStatus===undefined,"Transport evidence present; reconcile only");
+  if(row.status==="REJECTED_BEFORE_EXECUTION"){
+   ensure(!active.exists||active.get("requestId")!==approval.requestId,"Rejected reservation still owns a lock; investigate");
+   return {disposition:"ALREADY_REJECTED" as const,requestId:approval.requestId,issuanceEnabled:false};
+  }
+  ensure(active.exists&&active.get("requestId")===approval.requestId&&active.get("operation")===row.operation&&active.get("fingerprint")===row.fingerprint,"Native recovery lock mismatch");
+  tx.update(ref,{status:"REJECTED_BEFORE_EXECUTION",completedAt:new Date().toISOString(),recoveryActor:actor,recoveryReason:recoveryReason.trim(),recoveryMode:"EXPLICIT_PRE_TRANSPORT_ABANDONMENT"});
+  tx.delete(lock);
+  return {disposition:"ABANDONED_BEFORE_EXECUTION" as const,requestId:approval.requestId,issuanceEnabled:false};
+ });
+}
