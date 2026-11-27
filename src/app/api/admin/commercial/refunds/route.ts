@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {createHash,randomUUID} from "node:crypto";
-import {nativeCreditForm,validateAllocatedCreditPreview,parseNativeCreditPreflight,nativeCreditReplayStatus,prepareNativeCreditAuthorization,reconcileNativeCredit,type NativeCreditEvidence} from "@/lib/commercial-credit-refund-policy";
+import {nativeCreditForm,validateAllocatedCreditPreview,parseNativeCreditPreflight,nativeCreditReplayStatus,prepareNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce,parseNativeCreditExecution,nativeSandboxAcceptanceScope,type NativeCreditEvidence} from "@/lib/commercial-credit-refund-policy";
 import {staffIdentity,db,ok,fail,ApiError,str} from "@/lib/server";
 import {refundablePayment,validRefundAmount} from "@/lib/commercial-refund-policy";
 export const runtime="nodejs";
@@ -212,12 +212,35 @@ async function nativePreflight(req:NextRequest,actor:string,body:unknown){
  // Recheck both durable records after the external read, fail closed if either changed.
  const final=await db.runTransaction(async tx=>Promise.all([tx.get(prior.ref),tx.get(lock)]),{readOnly:true});
  if(final[0].exists||final[1].exists)throw new ApiError(409,"La solicitud o el pago cambió; consultar conciliación");
- return {disposition:"PREFLIGHT_ONLY",requestId:approval.requestId,invoiceNumber:fresh.view.invoiceNumber,subtotal:approval.subtotal,tax:approval.tax,total:approval.amount,issuanceEnabled:false};
+ return {disposition:"PREFLIGHT_ONLY",requestId:approval.requestId,invoiceNumber:fresh.view.invoiceNumber,subtotal:approval.subtotal,tax:approval.tax,total:approval.amount,issuanceEnabled:false,sandboxAcceptanceAvailable:nativeSandboxAcceptanceScope(approval,fresh.view.invoiceNumber)};
+}
+async function nativeExecute(req:NextRequest,actor:string,body:unknown){
+ let approval:ReturnType<typeof parseNativeCreditExecution>;
+ try{approval=parseNativeCreditExecution(body);}catch{throw new ApiError(400,"Solicitud de emisión Sandbox fuera del alcance autorizado");}
+ paymentId(approval.paymentIntentId);
+ const prior=await db.collection("audit").doc("commercial-refund-"+approval.requestId).get();
+ if(prior.exists){
+  try{return nativeCreditReplayStatus(actor,approval,prior.data()!);}catch{throw new ApiError(409,"Conflicto de solicitud existente; no repetir");}
+ }
+ const load=async()=>{
+  const fresh=await prospectiveCreditEvidence(req,approval.acronym,approval.paymentIntentId,String(approval.subtotal),approval.requestId);
+  if(!nativeSandboxAcceptanceScope(approval,fresh.view.invoiceNumber)||fresh.view.originalSubtotal!==50||fresh.view.originalTax!==7||fresh.view.originalTotal!==57||!fresh.evidence)throw new ApiError(409,"Factura de aceptación Sandbox no elegible; no emitir");
+  return fresh.evidence;
+ };
+ const initial=await load();
+ try{prepareNativeCreditAuthorization(actor,approval,initial);}catch{throw new ApiError(409,"La identidad o los importes cambiaron; no emitir");}
+ // Existing restricted rk_test key, fixed credit_notes endpoint, stable idempotency key.
+ // No retry or generic refund POST; reconciliation is a separate explicit operation.
+ try{return await executeNativeCreditOnce(db,actor,approval,initial,load,async(path,form,key)=>{
+  if(path!=="credit_notes"||key!=="nx-credit-"+approval.requestId)throw new ApiError(409,"Invalid native credit transport");
+  return stripe("credit_notes",form,key);
+ });}catch{throw new ApiError(409,"No repetir emisión. Consultar el estado con el ID de solicitud.");}
 }
 export async function POST(req:NextRequest){
  try{
  const actor=await authorized(req);const b=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
  if(b?.action==="native-preflight")return ok(await nativePreflight(req,actor,b));
+ if(b?.action==="native-execute")return ok(await nativeExecute(req,actor,b));
  if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).some(k=>!["paymentIntentId","amount","reason","requestId","expectedRefunded","confirmed","acronym"].includes(k)))throw new ApiError(400,"Invalid refund request");
  const id=paymentId(b.paymentIntentId),reason=str(b.reason,500);
  if(b.confirmed!==true||typeof b.requestId!=="string"||!(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(b.requestId))||!Number.isSafeInteger(b.amount)||b.amount<=0||!Number.isSafeInteger(b.expectedRefunded)||b.expectedRefunded<0)throw new ApiError(400,"Invalid refund authorization");
@@ -231,6 +254,6 @@ export async function POST(req:NextRequest){
  }
  // New paid-invoice refunds must originate from a Stripe credit note. Preserve
  // legacy retry/reconciliation above, but do not create another uncredited refund.
- throw new ApiError(409,"Nuevos reembolsos requieren nota de crédito fiscal; emisión todavía no habilitada. Usa previsualización.");
+ throw new ApiError(409,"Nuevos reembolsos requieren nota de crédito fiscal. Usa el flujo fiscal autorizado de Sandbox.");
  }catch(e){return fail(e);}
 }
