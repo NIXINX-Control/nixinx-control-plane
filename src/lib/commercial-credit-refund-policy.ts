@@ -206,3 +206,24 @@ export async function executeNativeCreditOnce(db:Firestore,actor:string,approval
  }
  return {disposition:"RECONCILE_REQUIRED" as const,requestId:x.requestId};
 }
+
+/** Strict HTTP boundary for the read-only authorization preflight. */
+export function parseNativeCreditPreflight(body:unknown):NativeCreditApproval{
+ ensure(body!==null&&typeof body==="object"&&!Array.isArray(body),"Invalid credit preflight");
+ const b=body as Record<string,unknown>;
+ const fields=["action","requestId","acronym","invoiceId","paymentIntentId","subtotal","tax","amount","expectedRefunded","confirmed","reason"];
+ ensure(Object.keys(b).length===fields.length&&Object.keys(b).every(k=>fields.includes(k))&&b.action==="native-preflight","Invalid credit preflight fields");
+ ensure(typeof b.requestId==="string"&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(b.requestId)&&typeof b.acronym==="string"&&/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(b.acronym)&&id(b.invoiceId,"in_")&&id(b.paymentIntentId,"pi_")&&b.invoiceId.length<=103&&b.paymentIntentId.length<=103,"Invalid credit preflight identity");
+ ensure(cents(b.subtotal)&&b.subtotal>0&&b.subtotal<=999999999&&cents(b.tax)&&cents(b.amount)&&b.subtotal+b.tax===b.amount&&b.expectedRefunded===0,"Invalid fiscal preflight amount");
+ ensure(b.confirmed===true&&typeof b.reason==="string"&&b.reason.trim().length>0&&b.reason.length<=500,"Confirmation and reason required");
+ return {requestId:b.requestId,acronym:b.acronym,invoiceId:b.invoiceId,paymentIntentId:b.paymentIntentId,subtotal:b.subtotal,tax:b.tax,amount:b.amount,expectedRefunded:0,confirmed:true,reason:b.reason.trim()};
+}
+/** Check existing durable request before requesting a fresh quote. Never authorize
+ * or resend from this path, even if a refund already changed the balance. */
+export function nativeCreditReplayStatus(actor:string,approval:NativeCreditApproval,record:Record<string,any>){
+ const x=record.creditIntent as NativeCreditIntent;
+ ensure(x&&typeof x==="object","Missing credit intent");validateNativeCreditIntent(x);
+ ensure(record.action==="COMMERCIAL_REFUND"&&record.operation==="NATIVE_CREDIT_REFUND_V1"&&record.environment==="sandbox"&&record.actor===actor&&record.requestId===approval.requestId&&x.requestId===approval.requestId&&record.target===approval.paymentIntentId&&x.paymentIntentId===approval.paymentIntentId&&record.acronym===approval.acronym&&record.invoiceId===approval.invoiceId&&x.invoiceId===approval.invoiceId&&record.reason===approval.reason.trim()&&record.amount===approval.amount&&x.amount===approval.amount&&x.tax===approval.tax&&x.subtotal===approval.subtotal&&record.expectedRefunded===approval.expectedRefunded,"Existing authorization conflict");
+ ensure(["VALIDATING","AUTHORIZED","STRIPE_RECORDED","REJECTED_BEFORE_EXECUTION"].includes(record.status),"Unknown credit state");
+ return {disposition:"EXISTING_REQUEST" as const,requestId:approval.requestId,status:record.status as string,issuanceEnabled:false};
+}

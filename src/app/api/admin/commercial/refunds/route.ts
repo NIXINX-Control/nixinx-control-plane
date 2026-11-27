@@ -1,6 +1,6 @@
 import {NextRequest} from "next/server";
 import {createHash,randomUUID} from "node:crypto";
-import {nativeCreditForm,validateAllocatedCreditPreview,type NativeCreditEvidence} from "@/lib/commercial-credit-refund-policy";
+import {nativeCreditForm,validateAllocatedCreditPreview,parseNativeCreditPreflight,nativeCreditReplayStatus,prepareNativeCreditAuthorization,reconcileNativeCredit,type NativeCreditEvidence} from "@/lib/commercial-credit-refund-policy";
 import {staffIdentity,db,ok,fail,ApiError,str} from "@/lib/server";
 import {refundablePayment,validRefundAmount} from "@/lib/commercial-refund-policy";
 export const runtime="nodejs";
@@ -34,11 +34,18 @@ async function review(id:string){
  return {paymentIntentId:id,customerId:customer.id,customerName:typeof customer.name==="string"?customer.name:null,chargeId:charge.id,currency:"cad",captured:charge.amount_captured,refunded:charge.amount_refunded,available};
 }
 function requestIdentifier(v:unknown){if(typeof v!=="string"||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v))throw new ApiError(400,"Invalid refund request reference");return v;}
-async function reconcile(requestId:string){
+async function reconcile(req:NextRequest,requestId:string){
  const ref=db.collection("audit").doc("commercial-refund-"+requestId);
  const snap=await ref.get(),record=snap.data();
  if(!record||record.action!=="COMMERCIAL_REFUND"||record.environment!=="sandbox")throw new ApiError(404,"Refund authorization not found");
- if(record.operation!==undefined)throw new ApiError(409,"Native credit authorization requires its own reconciliation; do not create another request.");
+ if(record.operation==="NATIVE_CREDIT_REFUND_V1"){
+  if(record.status==="VALIDATING")return {requestId,status:"VALIDATING",reconciled:false,issuanceEnabled:false};
+  if(record.status==="REJECTED_BEFORE_EXECUTION")return {requestId,status:"REJECTED_BEFORE_EXECUTION",reconciled:false,issuanceEnabled:false};
+  const payment=await review(paymentId(record.target)),binding=await boundPayment(req,record.acronym,payment.paymentIntentId,payment);
+  const result=await reconcileNativeCredit(db,requestId,{...binding,paymentIntentId:payment.paymentIntentId,chargeId:payment.chargeId,customerId:payment.customerId,captured:payment.captured,refunded:payment.refunded},path=>stripe(path));
+  return {...result,id:result.refundId,requestId,issuanceEnabled:false};
+ }
+ if(record.operation!==undefined)throw new ApiError(409,"Unknown credit operation; do not create another request.");
  const id=paymentId(record.target),lock=db.collection("commercialRefundLocks").doc(id);
  const intent=await stripe("payment_intents/"+id);
  if(intent.id!==id||intent.customer!==record.customerId||intent.latest_charge!==record.chargeId||!/^ch_[A-Za-z0-9]+$/.test(record.chargeId))throw new ApiError(409,"Refund payment evidence mismatch");
@@ -187,11 +194,30 @@ export async function GET(req:NextRequest){
  return ok({customers:data.customers.map((v:any)=>({acronym:v.acronym,company:v.company})),cursor:data.cursor});
  }const fiscalBase=req.nextUrl.searchParams.get("fiscalBase");if(fiscalBase!==null)return ok(await prospectiveCredit(req,req.nextUrl.searchParams.get("acronym")??"",paymentId(req.nextUrl.searchParams.get("paymentIntentId")),fiscalBase));const creditRequest=req.nextUrl.searchParams.get("creditPreview");if(creditRequest!==null)return ok(await creditPreview(req,requestIdentifier(creditRequest),req.nextUrl.searchParams.get("acronym")??""));const acronym=req.nextUrl.searchParams.get("acronym");if(acronym!==null){
  return ok(await commercialLookup(req,acronym));
- }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
+ }const requestId=req.nextUrl.searchParams.get("requestId");if(requestId)return ok(await reconcile(req,requestIdentifier(requestId)));return ok(await review(paymentId(req.nextUrl.searchParams.get("paymentIntentId"))));}catch(e){return fail(e);}
+}
+async function nativePreflight(req:NextRequest,actor:string,body:unknown){
+ let approval:ReturnType<typeof parseNativeCreditPreflight>;
+ try{approval=parseNativeCreditPreflight(body);}catch{throw new ApiError(400,"Solicitud de validación fiscal inválida");}
+ const prior=await db.collection("audit").doc("commercial-refund-"+approval.requestId).get();
+ if(prior.exists){
+  try{return nativeCreditReplayStatus(actor,approval,prior.data()!);}catch{throw new ApiError(409,"Conflicto de solicitud existente; no crear otra");}
+ }
+ const lock=db.collection("commercialRefundLocks").doc(paymentId(approval.paymentIntentId));
+ if((await lock.get()).exists)throw new ApiError(409,"Existe una operación pendiente de conciliación");
+ const fresh=await prospectiveCreditEvidence(req,approval.acronym,approval.paymentIntentId,String(approval.subtotal),approval.requestId);
+ if(!fresh.evidence)throw new ApiError(409,"Stripe no confirmó la elegibilidad fiscal");
+ try{prepareNativeCreditAuthorization(actor,approval,fresh.evidence);}catch{throw new ApiError(409,"La identidad o los importes cambiaron; vuelve a calcular");}
+ // No reservation or authorization is created: issuance remains disabled.
+ // Recheck both durable records after the external read, fail closed if either changed.
+ const final=await db.runTransaction(async tx=>Promise.all([tx.get(prior.ref),tx.get(lock)]),{readOnly:true});
+ if(final[0].exists||final[1].exists)throw new ApiError(409,"La solicitud o el pago cambió; consultar conciliación");
+ return {disposition:"PREFLIGHT_ONLY",requestId:approval.requestId,invoiceNumber:fresh.view.invoiceNumber,subtotal:approval.subtotal,tax:approval.tax,total:approval.amount,issuanceEnabled:false};
 }
 export async function POST(req:NextRequest){
  try{
  const actor=await authorized(req);const b=await req.json().catch(()=>{throw new ApiError(400,"Invalid JSON")});
+ if(b?.action==="native-preflight")return ok(await nativePreflight(req,actor,b));
  if(!b||typeof b!=="object"||Array.isArray(b)||Object.keys(b).some(k=>!["paymentIntentId","amount","reason","requestId","expectedRefunded","confirmed","acronym"].includes(k)))throw new ApiError(400,"Invalid refund request");
  const id=paymentId(b.paymentIntentId),reason=str(b.reason,500);
  if(b.confirmed!==true||typeof b.requestId!=="string"||!(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(b.requestId))||!Number.isSafeInteger(b.amount)||b.amount<=0||!Number.isSafeInteger(b.expectedRefunded)||b.expectedRefunded<0)throw new ApiError(400,"Invalid refund authorization");
@@ -201,7 +227,7 @@ export async function POST(req:NextRequest){
  if(prior.exists){
   if(prior.get("fingerprint")!==fingerprint)throw new ApiError(409,"Refund request conflict");
   if(prior.get("status")==="REJECTED_BEFORE_EXECUTION")throw new ApiError(409,"Authorization rejected before execution; review payment again");
-  return ok(await reconcile(requestIdentifier(b.requestId)));
+  return ok(await reconcile(req,requestIdentifier(b.requestId)));
  }
  // New paid-invoice refunds must originate from a Stripe credit note. Preserve
  // legacy retry/reconciliation above, but do not create another uncredited refund.
