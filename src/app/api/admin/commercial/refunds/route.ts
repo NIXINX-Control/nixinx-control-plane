@@ -98,7 +98,7 @@ function invoiceLineEvidence(invoice:any){
 
  return {line,originalTax};
 }
-async function prospectiveCreditEvidence(req:NextRequest,acronym:string,id:string,baseRaw:string,requestId=randomUUID()){
+async function prospectiveCreditEvidence(req:NextRequest,acronym:string,id:string,baseRaw:string,requestId:string=randomUUID()){
  if(!/^\d{1,9}$/.test(baseRaw))throw new ApiError(400,"Importe base inválido");
  const base=Number(baseRaw),p=await review(id),binding=await boundPayment(req,acronym,id,p);
  const [invoice,notes]=await Promise.all([stripe("invoices/"+binding.invoiceId),stripe("credit_notes?"+new URLSearchParams({invoice:binding.invoiceId,limit:"100"}))]);
