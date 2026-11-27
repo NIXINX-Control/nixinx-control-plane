@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 const compiled=ts.transpileModule(fs.readFileSync(new URL("../src/lib/commercial-credit-refund-policy.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
+const {nativeCreditForm,validateAllocatedCreditPreview,validateIssuedCredit,prepareNativeCreditAuthorization,reserveNativeCreditAuthorization,reconcileNativeCredit,executeNativeCreditOnce}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 const intent={invoiceId:"in_fixture",lineId:"il_fixture",paymentIntentId:"pi_fixture",chargeId:"ch_fixture",customerId:"cus_fixture",requestId:"11111111-1111-4111-8111-111111111111",subtotal:17,tax:2,amount:19,taxRateIds:["txr_fixture"]};
 const preview={object:"credit_note",livemode:false,invoice:intent.invoiceId,customer:intent.customerId,currency:"cad",type:"post_payment",total:19,total_excluding_tax:17,lines:{has_more:false,data:[{type:"invoice_line_item",invoice_line_item:intent.lineId}]},tax_amounts:[{amount:2,tax_rate:"txr_fixture"}],out_of_band_amount:0,customer_balance_transaction:null,refund:null};
 const issued={...preview,id:"cn_fixture",status:"issued",refund:"re_fixture",metadata:{nixinx_request_id:intent.requestId,nixinx_owner:"nixinx-commercial-sandbox-v1"}};
@@ -126,4 +126,44 @@ test("reconciliation refuses a validating-only reservation or a wrong commercial
  data.set(key,{...data.get(key),status:"VALIDATING"});
  await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,binding,stripeFixture()),/not executable/);
  assert.equal(data.has(lock),true);
+});
+
+test("native execution reserves then revalidates under lock, authorizes before one Stripe transport",async()=>{
+ const {db,data}=transactionFixture();
+ const audit="audit/commercial-refund-"+intent.requestId,lock="commercialRefundLocks/"+intent.paymentIntentId;
+ let calls=0,reads=0;
+ const refresh=async()=>{reads++;assert.equal(data.get(audit).status,"VALIDATING");assert.equal(data.has(lock),true);return evidence;};
+ const write=async(path,form,key)=>{calls++;assert.equal(path,"credit_notes");assert.equal(data.get(audit).status,"AUTHORIZED");assert.equal(data.get(audit).idempotencyKey,key);assert.equal(key,"nx-credit-"+intent.requestId);assert.equal(form.get("refund_amount"),"19");assert.equal(form.has("refund"),false);assert.equal(data.has(lock),true);return issued;};
+ const r=await executeNativeCreditOnce(db,"staff_fixture",approval,evidence,refresh,write);
+ assert.equal(r.disposition,"RECONCILE_REQUIRED");assert.equal(calls,1);assert.equal(reads,1);
+ assert.equal((await executeNativeCreditOnce(db,"staff_fixture",approval,evidence,refresh,write)).disposition,"RECONCILE_ONLY");
+ assert.equal(calls,1);assert.equal(data.get(audit).status,"AUTHORIZED");assert.equal(data.has(lock),true);
+ const done=await reconcileNativeCredit(db,intent.requestId,binding,stripeFixture());
+ assert.equal(done.status,"succeeded");assert.equal(data.has(lock),false);
+});
+test("changed fresh fiscal evidence rejects before execution and releases only matching lock",async()=>{
+ for(const fresh of [null,{...evidence,available:56},{...evidence,refunded:1},{...evidence,allocationVerified:false}]){
+  const {db,data}=transactionFixture();let calls=0;
+  await assert.rejects(()=>executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>fresh,async()=>{calls++}));
+  assert.equal(calls,0);assert.equal(data.get("audit/commercial-refund-"+intent.requestId).status,"REJECTED_BEFORE_EXECUTION");
+  assert.equal(data.has("commercialRefundLocks/"+intent.paymentIntentId),false);
+ }
+});
+test("two concurrent identical native approvals make at most one transport attempt",async()=>{
+ const {db,data}=transactionFixture();let calls=0;
+ const run=()=>executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>evidence,async()=>{calls++;throw Error("ambiguous timeout");});
+ const r=await Promise.all([run(),run()]);
+ assert.equal(r.filter(v=>v.disposition==="RECONCILE_REQUIRED").length,1);
+ assert.equal(r.filter(v=>v.disposition==="RECONCILE_ONLY").length,1);
+ assert.equal(calls,1);assert.equal(data.has("commercialRefundLocks/"+intent.paymentIntentId),true);
+ await assert.rejects(()=>reconcileNativeCredit(db,intent.requestId,binding,stripeFixture({notes:[]})));
+ assert.equal(data.has("commercialRefundLocks/"+intent.paymentIntentId),true);
+ assert.equal((await run()).disposition,"RECONCILE_ONLY");assert.equal(calls,1);
+});
+test("lock change during revalidation never authorizes or deletes a competing lock",async()=>{
+ const {db,data}=transactionFixture();let calls=0;
+ const lock="commercialRefundLocks/"+intent.paymentIntentId;
+ await assert.rejects(()=>executeNativeCreditOnce(db,"staff_fixture",approval,evidence,async()=>{data.set(lock,{requestId:"foreign"});return evidence;},async()=>{calls++;}),/lock mismatch/);
+ assert.equal(calls,0);assert.equal(data.get(lock).requestId,"foreign");
+ assert.equal(data.get("audit/commercial-refund-"+intent.requestId).status,"VALIDATING");
 });

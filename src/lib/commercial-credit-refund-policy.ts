@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import type {Firestore} from "firebase-admin/firestore";
+import type {Firestore,DocumentSnapshot} from "firebase-admin/firestore";
 // Stripe is the fiscal authority. All monetary values are integer CAD cents.
 export type NativeCreditIntent={invoiceId:string;lineId:string;paymentIntentId:string;chargeId:string;customerId:string;requestId:string;subtotal:number;tax:number;amount:number;taxRateIds:string[]};
 const id=(v:unknown,prefix:string):v is string=>typeof v==="string"&&v.startsWith(prefix)&&/^[A-Za-z0-9_]+$/.test(v);
@@ -149,4 +149,60 @@ export async function reconcileNativeCredit(db:Firestore,requestId:string,bindin
   if(result.status==="succeeded")tx.delete(lock);
   return {...result,reconciled:true,lockRetained:result.status!=="succeeded"};
  });
+}
+
+type FreshNativeEvidence=()=>Promise<NativeCreditEvidence|null>;
+type NativeStripeWrite=(path:"credit_notes",form:URLSearchParams,key:string)=>Promise<unknown>;
+/** Internal orchestration only; no route or UI may invoke this until acceptance.
+ * Caller supplies authenticated actor, server-derived evidence and Sandbox-only adapter.
+ * The single winning transaction authorizes one transport attempt. A replay or
+ * ambiguous response must use reconciliation, never a second write/new key.
+ */
+export async function executeNativeCreditOnce(db:Firestore,actor:string,approval:NativeCreditApproval,initial:NativeCreditEvidence,refresh:FreshNativeEvidence,stripeWrite:NativeStripeWrite){
+ const approved={...approval};
+ const candidate=prepareNativeCreditAuthorization(actor,approved,initial);
+ const x=candidate.intent;
+ const fingerprint=createHash("sha256").update(candidate.fingerprintPayload).digest("hex");
+ const key="nx-credit-"+x.requestId;
+ const ref=db.collection("audit").doc("commercial-refund-"+x.requestId);
+ const lock=db.collection("commercialRefundLocks").doc(x.paymentIntentId);
+ const reservation=await reserveNativeCreditAuthorization(db,actor,approved,initial);
+ ensure(reservation.fingerprint===fingerprint,"Native reservation fingerprint mismatch");
+ if(reservation.disposition!=="RESERVED")return {disposition:"RECONCILE_ONLY" as const,requestId:x.requestId};
+ const check=(record:DocumentSnapshot,active:DocumentSnapshot)=>{
+  ensure(record.exists&&record.get("status")==="VALIDATING"&&record.get("action")==="COMMERCIAL_REFUND"&&record.get("operation")===candidate.operation&&record.get("environment")==="sandbox"&&record.get("fingerprint")===fingerprint&&record.get("requestId")===x.requestId&&record.get("target")===x.paymentIntentId&&record.get("actor")===actor&&record.get("amount")===x.amount&&record.get("customerId")===x.customerId&&record.get("chargeId")===x.chargeId&&record.get("invoiceId")===x.invoiceId&&record.get("acronym")===candidate.binding.acronym&&record.get("orderId")===candidate.binding.orderId&&record.get("subscriptionId")===candidate.binding.subscriptionId,"Native authorization state conflict");
+  const stored=record.get("creditIntent") as NativeCreditIntent;
+  ensure(stored&&nativeCreditForm(stored).toString()===nativeCreditForm(x).toString()&&stored.paymentIntentId===x.paymentIntentId&&stored.chargeId===x.chargeId&&stored.customerId===x.customerId&&stored.tax===x.tax&&JSON.stringify([...stored.taxRateIds].sort())===JSON.stringify([...x.taxRateIds].sort()),"Native intent changed");
+  ensure(active.exists&&active.get("requestId")===x.requestId&&active.get("operation")===candidate.operation&&active.get("fingerprint")===fingerprint,"Native execution lock mismatch");
+ };
+ // Verify ownership before performing the fresh external read. Nothing is written to Stripe.
+ await db.runTransaction(async tx=>{const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);check(record,active);});
+ let form:URLSearchParams;
+ try{
+  const latest=await refresh();
+  ensure(latest!==null,"Fresh fiscal allocation unavailable");
+  const current=prepareNativeCreditAuthorization(actor,approved,latest);
+  ensure(current.fingerprintPayload===candidate.fingerprintPayload,"Fiscal authorization changed; review again");
+  form=nativeCreditForm(current.intent);
+ }catch(error){
+  // Only before transport, and only our exact VALIDATING record and lock.
+  await db.runTransaction(async tx=>{
+   const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);check(record,active);
+   tx.update(ref,{status:"REJECTED_BEFORE_EXECUTION",completedAt:new Date().toISOString()});
+   tx.delete(lock);
+  });
+  throw error;
+ }
+ // Commit authorization before the external mutation. The transaction never
+ // invokes Stripe, even if Firestore retries its callback.
+ await db.runTransaction(async tx=>{
+  const [record,active]=await Promise.all([tx.get(ref),tx.get(lock)]);check(record,active);
+  tx.update(ref,{status:"AUTHORIZED",authorizedAt:new Date().toISOString(),idempotencyKey:key});
+ });
+ // A successful transport response is not proof of settlement. Timeout, rejection
+ // or crash after authorization leaves the durable lock for read-only reconciliation.
+ try{await stripeWrite("credit_notes",form,key);}catch{
+  return {disposition:"RECONCILE_REQUIRED" as const,requestId:x.requestId};
+ }
+ return {disposition:"RECONCILE_REQUIRED" as const,requestId:x.requestId};
 }
