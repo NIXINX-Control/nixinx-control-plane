@@ -22,3 +22,20 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: example
           FIREBASE_PROJECT_ID: example
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/none
+  firestore-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm install --no-audit --no-fund
+      - name: Firestore emulator transaction acceptance (no cloud credentials)
+        run: |
+          printf '%s\n' '{"firestore":{"rules":"firestore.rules"},"emulators":{"firestore":{"host":"127.0.0.1","port":8080},"ui":{"enabled":false},"singleProjectMode":true}}' > firebase.concurrency.local.json
+          npx --yes firebase-tools@14.12.0 emulators:exec --config firebase.concurrency.local.json --project demo-nixinx-credit-concurrency --only firestore "node --test tests/integration/native-credit-firestore.test.mjs"
