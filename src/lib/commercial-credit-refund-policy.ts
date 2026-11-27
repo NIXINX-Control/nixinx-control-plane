@@ -256,3 +256,19 @@ export async function abandonNativeValidatingReservation(db:Firestore,actor:stri
   return {disposition:"ABANDONED_BEFORE_EXECUTION" as const,requestId:approval.requestId,issuanceEnabled:false};
  });
 }
+
+/** Temporary, deliberately narrow acceptance gate, not a general refund policy.
+ * Expansion requires a separate FDV decision after the Sandbox test.
+ */
+export function nativeSandboxAcceptanceScope(approval:NativeCreditApproval,invoiceNumber:unknown){
+ return approval.acronym==="nxtest"&&invoiceNumber==="CL9MQZZD-0001"&&approval.subtotal===17&&approval.tax===2&&approval.amount===19&&approval.expectedRefunded===0;
+}
+export function parseNativeCreditExecution(body:unknown):NativeCreditApproval{
+ ensure(body!==null&&typeof body==="object"&&!Array.isArray(body),"Invalid execution request");
+ const b=body as Record<string,unknown>;
+ ensure(b.action==="native-execute"&&b.executionConfirmed===true,"Explicit execution confirmation required");
+ const {executionConfirmed:_,...rest}=b;
+ const approval=parseNativeCreditPreflight({...rest,action:"native-preflight"});
+ ensure(nativeSandboxAcceptanceScope(approval,"CL9MQZZD-0001"),"Outside approved Sandbox acceptance scope");
+ return approval;
+}
