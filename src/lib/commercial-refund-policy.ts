@@ -4,3 +4,13 @@ export function refundablePayment(intent:any,charge:any,customer:any){
  return charge.amount_captured-charge.amount_refunded;
 }
 export function validRefundAmount(value:unknown,available:number):value is number{return typeof value==="number"&&Number.isSafeInteger(value)&&value>0&&value<=available;}
+
+/** Parse positive CAD input directly into integer cents, including .17.
+ * Keep the server's nine-digit cents limit and reject excess precision.
+ */
+export function parseRefundBaseCents(value:string):number|null{
+ if(typeof value!=="string"||!/^(?:\d{1,8}(?:\.\d{1,2})?|\.\d{1,2})$/.test(value))return null;
+ const [whole="",fraction=""]=value.split(".");
+ const cents=Number(whole)*100+Number(fraction.padEnd(2,"0"));
+ return Number.isSafeInteger(cents)&&cents>0&&cents<=999999999?cents:null;
+}
